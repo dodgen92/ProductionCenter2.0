@@ -3,3 +3,8 @@ requests
 python-dotenv
 obsws-python
 Pillow
+google-genai
+keyboard
+PyAudio
+PyAutoGUI
+SpeechRecognition
