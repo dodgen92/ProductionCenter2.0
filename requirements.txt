@@ -2,6 +2,7 @@ flask
 requests
 python-dotenv
 obsws-python
+edge-tts
 Pillow
 google-genai
 keyboard

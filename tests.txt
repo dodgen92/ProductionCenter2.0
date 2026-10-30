@@ -1,0 +1,178 @@
+Tests for you to write. The examples in tests/test_examples.py are already done.
+Copy one of those, keep Arrange / Act / Assert, and add a one-line comment that says what it proves.
+Easiest first. Do not need OBS, Twitch, or the network. Mock those.
+
+1. Local GET /events is allowed
+   What: the tunnel guard lets this PC read the feed.
+   Hint: client.get("/events") with no extra headers. Route events(). Nothing to mock.
+   Expect: status 200.
+
+2. A webhook with no signature is rejected
+   What: POST /webhook with no Twitch signature headers.
+   Hint: route webhook(). No mock.
+   Expect: status 403, and the event feed is still empty.
+
+3. /translate rejects an unknown language
+   What: target=nope is not in the allowlist.
+   Hint: GET /translate. Route translate(). No mock, because it should fail before any HTTP call.
+   Expect: status 400.
+
+4. /tts rejects an empty line
+   What: missing text is a bad request, and edge-tts is not called.
+   Hint: GET /tts with no text. Mock Server._edge_tts_bytes so a call would fail the test if it happened.
+   Expect: status 400, and the mock was not called.
+
+5. /translate rejects text over 300 characters
+   What: the 300 character limit.
+   Hint: GET /translate?target=en with 301 letters. Mock requests.get so a real call would be obvious.
+   Expect: status 413, and requests.get was not called.
+
+6. /tts rejects text over 300 characters
+   What: the same limit on speech.
+   Hint: GET /tts. Mock Server._edge_tts_bytes.
+   Expect: status 413, and the mock was not called.
+
+7. ngrok cannot use the translator
+   What: the tunnel guard covers /translate.
+   Hint: GET /translate with header X-Forwarded-For. No mock.
+   Expect: status 403.
+
+8. Voice lines are local-only
+   What: OBS on this PC can fetch a line, and a forwarded request cannot.
+   Hint: point VOICE_LINES_DIR at tmp_path, write orc/hello.mp3, GET /voice_lines/orc/hello.mp3. Repeat with X-Forwarded-For.
+   Expect: local status 200, forwarded status 403.
+
+9. The webhook still works through ngrok
+   What: POST /webhook is the one route the guard allows from the internet.
+   Hint: signed POST /webhook (use signed_headers) plus header X-Forwarded-For. Reward title "Not A Real Reward" so no effect starts.
+   Expect: status 200. A bad signature in this same setup is still 403, from the signature check.
+
+10. A stale timestamp is rejected
+    What: a signed message older than 10 minutes is refused.
+    Hint: build signed_headers, then set Twitch-Eventsub-Message-Timestamp to about 11 minutes ago and recompute the signature for that older timestamp. Function timestamp_is_stale().
+    Expect: status 403.
+
+11. A challenge comes back as plain text
+    What: webhook_callback_verification returns the challenge only after the signature checks out.
+    Hint: message type webhook_callback_verification, body {"challenge": "pogchamp"}. Sign it. Route webhook().
+    Expect: status 200, Content-Type starts with text/plain, body is exactly pogchamp.
+
+12. A duplicate message id is dropped
+    What: Twitch retries do not publish twice.
+    Hint: POST the same signed notification twice with the same Twitch-Eventsub-Message-Id. Use a follow event so you can see the feed. Function already_seen().
+    Expect: first status 200 and one follow event. Second status 204 and still one event.
+
+13. Credits reset is local-only
+    What: POST /credits/reset clears the roll, and ngrok cannot clear it.
+    Hint: add_credit once, POST /credits/reset, read the temp credits file. Then add a name again and POST with X-Forwarded-For.
+    Expect: after a local reset the lists are empty and status 200. The forwarded reset is 403 and the name is still there.
+
+14. A follow is published and credited
+    What: channel.follow becomes type follow and a Follows credit.
+    Hint: signed notification, subscription type channel.follow, event user_name and user_login. Or call handle_notification directly.
+    Expect: one event with type follow, user, and login. credits JSON group follows has that display name once.
+
+15. A cheer publishes bits
+    What: channel.cheer becomes type bits with the bit count.
+    Hint: handle_notification("channel.cheer", {"user_name": "RemyFriend", "user_login": "remyfriend", "bits": 500}).
+    Expect: event type bits, amount 500. Bits credit shows the name and 500.
+
+16. A resub publishes months
+    What: channel.subscription.message uses cumulative_months.
+    Hint: handle_notification with cumulative_months 15 and duration_months 6.
+    Expect: event type resub, months 15, amount 6. The viewer is in Subs.
+
+17. Two cheers from the same login add up
+    What: bit credits dedupe by login and sum the amounts.
+    Hint: add_credit("bits", ...) twice, or two cheer notifications. Nothing to mock.
+    Expect: one Bits line, amount is the sum.
+
+18. Anonymous gifts share one line
+    What: a gift with is_anonymous true has no login.
+    Hint: handle_notification("channel.subscription.gift", {"is_anonymous": true, "total": 5}).
+    Expect: event type gift, user Anonymous, amount 5. Gifted Subs shows Anonymous once.
+
+19. Google fails, MyMemory is used
+    What: the translator tries the next engine.
+    Hint: mock requests.get. If the URL is translate.googleapis.com, raise. If it is mymemory, return a MyMemory-shaped JSON. Route translate().
+    Expect: status 200 and the MyMemory text. requests.get was called twice.
+
+20. Every translate engine fails
+    What: the widget gets 502 and can show "my tome is closed".
+    Hint: mock requests.get so it always raises. Leave DEEPL_API_KEY unset (monkeypatch.delenv if your shell has one).
+    Expect: status 502.
+
+21. A banned word never reaches Google
+    What: banned_words.txt censors viewer text before the translator.
+    Hint: point BANNED_WORDS_FILE at a temp file that contains one word, mock requests.get, GET /translate with that word in the text. You may need to clear Server._banned_cache so it reloads the file.
+    Expect: the params["q"] sent to Google has stars instead of the word. Status 200.
+
+22. /tts uses the disk cache
+    What: the same line is spoken once.
+    Hint: mock Server._edge_tts_bytes to return b"fake-mp3" and count calls. Point TTS_DIR at tmp_path. GET /tts?text=hello twice.
+    Expect: status 200 both times, audio/mpeg, and the mock ran once.
+
+23. A revocation is logged and acknowledged
+    What: message type revocation does not publish an event.
+    Hint: signed POST, type revocation, body with subscription.type and subscription.status. Use pytest's capsys fixture to read the print. Function log_revocation().
+    Expect: status 200, the printed line includes the type and status, and the event feed is empty.
+
+24. The Pokémon reward calls catch_pokemon
+    What: the reward title routes to the right function, and the name is lowercased.
+    Hint: call route_channel_point_reward with title "Rip a Vintage Pokemon Card" and user_name "RemyFriend". Mock Server.catch_pokemon. Do not go through the webhook thread while you are learning this.
+    Expect: catch_pokemon was called once with "remyfriend". "Add Camera Filter" does not call it.
+
+25. A catch skips cards the viewer already owns
+    What: catch_pokemon only picks from the unowned numbers.
+    Hint: in Pokemon.pokerip, point COLLECTION_FILE at tmp_path, put card 1 in that viewer's list, mock display_card so it does not open OBS, and mock random.choice so it returns the first available number.
+    Expect: the returned number is not 1, and the saved list contains it. display_card was called. No OBS connection.
+
+26. Play a Clip still publishes when Helix has no clips
+    What: an empty clip list does not drop the event.
+    Hint: mock clips.get_app_token and clips.get_broadcaster_clips so the list is []. Point VOICE_LINES_DIR at a folder with one mp3. Call play_clip_for.
+    Expect: one event, type clip, clip_id "" and the other clip strings empty, voice_line set, duration 0. A warning was printed (capsys).
+
+27. The same voice line is not picked twice in a row
+    What: with 2 or more files, pick_voice_line avoids the previous file.
+    Hint: temp folder with exactly two mp3 files. Call pick_voice_line("orc") twice. No Helix mock needed.
+    Expect: the two returned paths are different.
+
+28. "play a clip" matches the reward title
+    What: the clip reward is case-insensitive. The older reward titles are still exact.
+    Hint: mock play_clip_for, call route_channel_point_reward with title "play a clip". Then try title "start" and confirm the archive was not treated as a clip.
+    Expect: play_clip_for was called for "play a clip" and was not called for "start".
+
+29. /widgets 404s when the folder is not configured
+    What: a missing WIDGETS_DIR does not guess a path on disk.
+    Hint: monkeypatch.delenv("WIDGETS_DIR", raising=False), GET /widgets/index.html, and read the print with capsys. Route widgets().
+    Expect: status 404, and the printed line says WIDGETS_DIR is not set.
+
+30. A widget subfolder is served, and the directory itself is not listed
+    What: nested files work, and you do not get a file listing.
+    Hint: temp WIDGETS_DIR with orc/index.html and orc/app.js. GET both files, then GET /widgets/orc/.
+    Expect: both files are 200 with Cache-Control no-store. The folder URL is 404.
+
+31. An empty monk question is canned
+    What: GET /counsel with no q does not call Gemini.
+    Hint: route counsel(). Mock requests.post so a call fails the test. Leave GEMINI_API_KEY set to a fake value.
+    Expect: status 200, source "canned", and the mock was not called.
+
+32. The monk stops at the daily cap
+    What: COUNSEL_DAILY_CAP blocks another Gemini call.
+    Hint: monkeypatch.setenv("COUNSEL_DAILY_CAP", "1"), point gemini_usage.USAGE_FILE at tmp_path, call gemini_usage("monk", bump=True) once, then GET /counsel. Mock requests.post.
+    Expect: source "canned", and requests.post was not called.
+
+33. A Gemini failure still returns a saying
+    What: a timeout or a bad response becomes a canned answer.
+    Hint: mock requests.post to raise requests.Timeout. Set a fake GEMINI_API_KEY.
+    Expect: status 200, source "canned", answer is one of MONK_SAYINGS.
+
+34. A banned word in Gemini's answer is not shown
+    What: the word filter runs on the reply too.
+    Hint: banned word "nope", mock requests.post to return text that contains "nope".
+    Expect: source "canned", and the body does not contain "nope".
+
+35. A huge Gemini answer is cut on a sentence
+    What: trim_counsel_answer keeps about 300 characters and ends on . ! or ?.
+    Hint: call trim_counsel_answer with two sentences, the first under 300 characters and the second past it. No mock.
+    Expect: the result ends with the first sentence's period and is at most 300 characters.

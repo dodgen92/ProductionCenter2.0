@@ -1,0 +1,7 @@
+# One word or phrase per line.
+# Blank lines and lines starting with # are ignored.
+# Matching is case-insensitive and whole-word ("cat" does not hide "catch").
+# This file ships with no words on purpose. Until you add one, nothing is filtered.
+# A missing or unreadable file also filters nothing, so a typo here cannot mute the stream.
+#
+# example: badword

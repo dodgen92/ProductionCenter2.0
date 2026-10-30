@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Production Center credits</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      background: transparent;
+      background-color: rgba(0, 0, 0, 0);
+      color: #ffffff;
+      font-family: "Palatino Linotype", Palatino, Georgia, serif;
+    }
+
+    #stage {
+      position: relative;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      background: transparent;
+    }
+
+    #roll {
+      position: absolute;
+      left: 0;
+      width: 1920px;
+      text-align: center;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 28px;
+      font-weight: normal;
+      letter-spacing: 0.42em;
+      text-transform: uppercase;
+      text-shadow: 0 2px 8px #000000;
+    }
+
+    h2 {
+      margin: 72px 0 18px;
+      font-size: 34px;
+      font-weight: normal;
+      letter-spacing: 0.32em;
+      text-transform: uppercase;
+      color: #f2d48a;
+      text-shadow: 0 2px 8px #000000;
+    }
+
+    p {
+      margin: 12px 0;
+      font-size: 42px;
+      text-shadow: 0 2px 8px #000000;
+    }
+
+    @keyframes crawl {
+      from { transform: translateY(1080px); }
+      to { transform: translateY(-100%); }
+    }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <div id="roll">
+      <h1>Thanks for watching</h1>
+      <p>Loading credits…</p>
+    </div>
+  </div>
+  <script>
+    var ORDER = ["Subs", "Gifted Subs", "Bits", "Follows"];
+    var lastStamp = "";
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function render(data) {
+      var html = "<h1>Thanks for watching</h1>";
+      var count = 0;
+      ORDER.forEach(function (label) {
+        var names = data[label] || [];
+        if (!names.length) {
+          return;
+        }
+        count += names.length;
+        html += "<h2>" + escapeHtml(label) + "</h2>";
+        names.forEach(function (name) {
+          html += "<p>" + escapeHtml(name) + "</p>";
+        });
+      });
+      if (!count) {
+        html += "<p>No credits yet this stream</p>";
+      }
+      var roll = document.getElementById("roll");
+      roll.innerHTML = html;
+      var seconds = Math.max(36, (count + 4) * 2.4);
+      roll.style.animation = "none";
+      void roll.offsetWidth;
+      roll.style.animation = "crawl " + seconds + "s linear infinite";
+    }
+
+    function refresh() {
+      fetch("/credits.json", { cache: "no-store" })
+        .then(function (response) {
+          if (!response.ok) {
+            return null;
+          }
+          return response.json();
+        })
+        .then(function (data) {
+          if (!data) {
+            return;
+          }
+          var stamp = JSON.stringify(data);
+          if (stamp === lastStamp) {
+            return;
+          }
+          lastStamp = stamp;
+          render(data);
+        })
+        .catch(function () {
+          /* The next poll will try again. */
+        });
+    }
+
+    refresh();
+    setInterval(refresh, 3000);
+  </script>
+</body>
+</html>

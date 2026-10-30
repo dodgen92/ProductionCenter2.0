@@ -1,4 +1,5 @@
 
+import sys
 import time
 
 import keyboard
@@ -13,7 +14,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Benito shares the Production Center's .env at the repo root.
-load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
+_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(dotenv_path=_ROOT / ".env")
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+from gemini_usage import gemini_usage
 API_KEY = os.environ.get("GEMINI_API_KEY", "")
 if not API_KEY:
     raise RuntimeError("Add GEMINI_API_KEY to the Production Center's .env file.")
@@ -133,6 +138,10 @@ def ask_benito(message):
             thinking_config=types.ThinkingConfig(thinking_budget=0),
         ),
     )
+    try:
+        gemini_usage("benito", bump=True)
+    except Exception as exc:
+        print(f"[Benito] Could not record Gemini usage: {type(exc).__name__}")
 
     if not response.candidates:
         print("Gemini returned no candidates.")
