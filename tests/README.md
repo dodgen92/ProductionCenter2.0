@@ -1,6 +1,6 @@
 # Tests, the short version
 
-These tests check Production Center without Twitch, OBS, ngrok, or the internet. The files in `tests/` are examples. `tests.txt` in the project folder is a list of tests for you to write.
+These tests check Production Center without Twitch, OBS, ngrok, or the internet. The files in `tests/` are examples.
 
 ## What a unit test is
 
@@ -140,11 +140,10 @@ The next test, `test_invalid_signature_is_rejected`, copies this setup and then 
 
 ## How to write a new test
 
-1. Pick an item from `tests.txt`.
-2. Copy the test above into `tests/test_examples.py` and rename it. Names read like a sentence: `test_stale_timestamp_is_rejected`.
-3. Change the Arrange so the scene matches the idea. Use `monkeypatch` when the idea says to mock.
-4. Keep a single Act.
-5. Assert the expected status, JSON, or function call. One behavior per test is enough.
-6. Run `pytest -v` and read the bottom line.
+1. Copy the test above into `tests/test_examples.py` and rename it. Names read like a sentence: `test_stale_timestamp_is_rejected`.
+2. Change the Arrange so the scene matches the idea. Use `monkeypatch` when the idea says to mock.
+3. Keep a single Act.
+4. Assert the expected status, JSON, or function call. One behavior per test is enough.
+5. Run `pytest -v` and read the bottom line.
 
 Do not point a test at real Twitch or a live OBS. If a test needs a file, use pytest's `tmp_path` (a temp folder that goes away after the test) the way the credits and clip tests do.
