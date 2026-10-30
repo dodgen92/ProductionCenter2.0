@@ -1,4 +1,4 @@
-"""Example unit tests. Read tests/README.md first."""
+"""Example unit tests. Read tests/README.md."""
 
 import json
 
