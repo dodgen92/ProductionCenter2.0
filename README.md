@@ -2,7 +2,7 @@
 
 **A live-stream control room that lets Twitch chat run the show.** Viewers spend channel points, and Production Center reacts in real time: it flips camera filters, rips animated Pokémon cards onto the screen, starts or stops automatic clipping that posts highlights straight to Discord, and can roll a random channel clip with an orc voice line.
 
-Widgets on this PC (the Fact Gnome, the translator, the orc, end credits) read one local feed from this server. Twitch only talks to `POST /webhook`.
+Widgets on this PC (the Fact Gnome, the translator, the orc, end credits) read one local feed from this server. The server connects out to Twitch EventSub over a WebSocket. Twitch does not call back into this PC.
 
 > 📸 **Demo:** _GIF or screenshot coming soon_
 > <!-- Drop a GIF of a redemption firing on stream here, e.g. ![Demo](docs/demo.gif) -->
@@ -28,15 +28,14 @@ Production Center ties **five separate systems** together into one real-time pip
 ```mermaid
 flowchart LR
     V[Viewer redeems reward] --> T[Twitch EventSub]
-    T -->|webhook| N[ngrok tunnel]
-    N --> F[Flask server]
+    T -->|WebSocket| F[Flask server on this PC]
     F --> O[OBS WebSocket<br/>scene animations]
     F --> A[AutoHotkey<br/>camera filters]
     F --> H[Twitch Helix API<br/>clip creation]
     H --> D[Discord webhook]
 ```
 
-- **Event-driven:** Twitch pushes events to a Flask webhook the moment they happen; there's no polling for redemptions.
+- **Event-driven:** This PC opens one WebSocket to Twitch. Events arrive the moment they happen. There is no polling for redemptions, and no public URL.
 - **Non-blocking:** Each effect runs on its own thread or process, so a 3-minute filter never stalls the next redemption.
 - **Process management:** The clipping loop runs as a supervised child process with safe start, stop, and force-kill handling.
 - **Persistent game state:** Per-viewer Pokémon collections survive between streams.
@@ -44,10 +43,9 @@ flowchart LR
 
 ## 🛠️ Tech used
 
-- **Python 3** with **Flask** (webhook server)
-- **Twitch EventSub** (redemptions, follows, subs, cheers) and **Twitch Helix API** (clips)
+- **Python 3** with **Flask** (local server on `127.0.0.1:5000`)
+- **Twitch EventSub WebSocket** via `websocket-client` (redemptions, follows, subs, cheers) and **Twitch Helix API** (subscriptions and clips)
 - **OBS WebSocket v5** via `obsws-python` (scene item animation and text updates)
-- **ngrok** (exposes only the webhook to Twitch over HTTPS)
 - **edge-tts** (free neural voices for widgets). ElevenLabs is optional.
 - **AutoHotkey** (camera filter hotkeys)
 - **Discord webhooks** (clip notifications)
@@ -56,7 +54,7 @@ flowchart LR
 ## 📁 Project layout
 
 ```
-Server.py              Flask server: webhook, feed, TTS, translate, credits
+Server.py              Flask server: EventSub WebSocket, feed, TTS, translate, credits
 archive.py             Auto-clipping loop (Twitch Helix) + Discord posting
 clips.py               App access token + Helix clip lookups
 Pokemon/pokerip.py     Pokémon card pull logic + OBS animation
@@ -67,16 +65,15 @@ voice_lines/orc/       Drop recorded mp3/wav lines here
                            Widgets stay in WIDGETS_DIR (not in this repo)
 CameraFilters/         Random filter picker, clear script, AutoHotkey filter hotkeys
 sheetripper.py         Utility: cut card sheets into single card images
-unsubscribe.py         Utility: remove old EventSub subscriptions
+unsubscribe.py         Utility: remove EventSub subscriptions (WebSocket or old webhook)
 tests/                 Example pytest tests and a short guide
-tests.txt              More tests to write yourself
 ```
 
 `tts_cache/` and `stream_credits.json` are created at runtime and gitignored. `stream_credits.json` holds viewer display names for the current roll.
 
 ## 🔐 Twitch scopes and how subscribing works
 
-On startup, `subscribe_to_events()` in `Server.py` registers one webhook subscription per event type. It does not open a Twitch login window. It sends your existing user token to Helix:
+On startup the server opens a WebSocket to `wss://eventsub.wss.twitch.tv/ws` (or `EVENTSUB_WS_URL`, if you set one). When Twitch sends `session_welcome`, `subscribe_to_events()` registers one subscription per event type on that session. It does not open a Twitch login window. It sends your existing user token to Helix:
 
 ```http
 POST https://api.twitch.tv/helix/eventsub/subscriptions
@@ -84,9 +81,9 @@ Client-ID: <TWITCH_CLIENT_ID>
 Authorization: Bearer <TWITCH_OAUTH_TOKEN>
 ```
 
-The JSON body uses `WEBHOOK_URL` as the callback and `EVENTSUB_SECRET` (or `SECRET`, if that is all you have) as the signing secret. Twitch then signs every `POST /webhook` with that secret. The server checks the signature before it does anything else.
+The JSON body sets the transport to `websocket` and includes the `session_id` from the welcome message. There is no callback URL and no signing secret.
 
-`TWITCH_OAUTH_TOKEN` must be a **user** access token for the broadcaster, not an app token. Generate a new one when you add scopes. With the [Twitch CLI](https://dev.twitch.tv/docs/cli/):
+`TWITCH_OAUTH_TOKEN` must be a **user** access token for the broadcaster. An **app** access token will not work for these WebSocket subscriptions. Generate a new user token when you add scopes. With the [Twitch CLI](https://dev.twitch.tv/docs/cli/):
 
 ```bash
 twitch token -u -s "channel:read:redemptions moderator:read:followers channel:read:subscriptions bits:read"
@@ -108,21 +105,22 @@ Play a Clip does **not** use that user token. It uses an app token from `clips.p
 ### What you need to change
 
 1. Copy any new keys from `.env.example` into `.env`. Names only live in the example file. Never commit `.env`.
-2. Set `EVENTSUB_SECRET` to the webhook secret (10–100 characters). If you leave it blank, the server keeps using `SECRET`, which is what it sent to Twitch before.
-3. Set `TWITCH_CLIENT_SECRET` to the app client secret. `clips.py` used to read `SECRET` for this. If `SECRET` was your made-up webhook secret and not the client secret, WoW clip lookup and Play a Clip need the real client secret now. If you leave `TWITCH_CLIENT_SECRET` blank, `clips.py` still falls back to `SECRET`.
-4. Replace `TWITCH_OAUTH_TOKEN` with a token that has all four scopes above. A token that only has `channel:read:redemptions` will keep redemptions working and Twitch will reject the new subscriptions (the server prints the error and keeps going).
-5. If you change `EVENTSUB_SECRET` or `WEBHOOK_URL`, run `python unsubscribe.py` and start the server again so Twitch stores the new callback and secret. A plain restart is fine when those values did not change: an already-active subscription prints `Already subscribed` (HTTP 409) and the new types are created.
-6. Create the channel point rewards in the Creator Dashboard (table above). Titles for the old rewards must match exactly. **Play a Clip** ignores case.
-7. Drop at least one `.mp3` or `.wav` in `voice_lines/orc/` if you want the orc to talk. With zero files the clip event is still published and `voice_line` is empty. The clip event also includes `reward` (the channel-point title) so a widget can filter on `?reward=`.
-8. Set `WIDGETS_DIR` to your Stream-Widgets folder. On this PC that is `C:\Users\tyler\Desktop\Stream-Widgets`. The server does not bake that path in. If the variable is blank or the folder is not there, `/widgets/...` returns 404 and prints why.
-9. Optional: `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` for `/tts?engine=eleven`. Optional: `DEEPL_API_KEY` as the last translation fallback. Optional: add lines to `banned_words.txt`.
+2. Delete `WEBHOOK_URL` and `EVENTSUB_SECRET` from `.env`. The server does not read them anymore. You can uninstall ngrok.
+3. Run `python unsubscribe.py` once. That deletes subscriptions left over from the old webhook, including any that still point at an old public address. WebSocket subscriptions also end when the server disconnects.
+4. Set `TWITCH_CLIENT_SECRET` to the app client secret. `clips.py` reads that for Play a Clip. If you leave it blank, `clips.py` still falls back to `SECRET`. Keep `SECRET` when that fallback is the client secret you still use.
+5. `TWITCH_OAUTH_TOKEN` must be a **user** token for your channel with all four scopes above. An app token will not create the WebSocket subscriptions. A token that only has `channel:read:redemptions` will keep redemptions working and Twitch will reject the other subscriptions (the server prints the error and keeps going).
+6. Leave `EVENTSUB_WS_URL` blank for real Twitch. Set it only when you point the client at the Twitch CLI mock (see below).
+7. Create the channel point rewards in the Creator Dashboard (table above). Titles for the old rewards must match exactly. **Play a Clip** ignores case.
+8. Drop at least one `.mp3` or `.wav` in `voice_lines/orc/` if you want the orc to talk. With zero files the clip event is still published and `voice_line` is empty. The clip event also includes `reward` (the channel-point title) so a widget can filter on `?reward=`.
+9. Set `WIDGETS_DIR` to your Stream-Widgets folder. On this PC that is `C:\Users\tyler\Desktop\Stream-Widgets`. The server does not bake that path in. If the variable is blank or the folder is not there, `/widgets/...` returns 404 and prints why.
+10. Optional: `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` for `/tts?engine=eleven`. Optional: `DEEPL_API_KEY` as the last translation fallback. Optional: add lines to `banned_words.txt`.
 
 `/translate` tries, in order: Google's free `translate.googleapis.com` `client=gtx` endpoint (no key), then [MyMemory](https://mymemory.translated.net/) (no key), then DeepL only if `DEEPL_API_KEY` is set. The Google endpoint is unofficial. It can change or rate-limit, which is why the fallbacks exist.
 
 ## 🚀 How to run it
 
 ### 1. Prerequisites
-- Windows, Python 3.10+, [OBS Studio](https://obsproject.com/) with WebSocket server enabled, [AutoHotkey](https://www.autohotkey.com/) v1, and [ngrok](https://ngrok.com/)
+- Windows, Python 3.10+, [OBS Studio](https://obsproject.com/) with WebSocket server enabled, and [AutoHotkey](https://www.autohotkey.com/) v1
 - A Twitch application ([dev.twitch.tv/console](https://dev.twitch.tv/console)) and the channel point rewards in the table above
 - A user token with the four scopes in the section above
 
@@ -139,11 +137,11 @@ copy .env.example .env
 ```
 Fill in `.env` with your own Twitch, Discord, and OBS values. **`.env` is git-ignored; never commit it.**
 
-New names you will see in `.env.example`:
+Names in `.env.example`:
 
 | Name | Required? | What it is |
 |---|---|---|
-| `EVENTSUB_SECRET` | Recommended | Webhook HMAC secret. Falls back to `SECRET`. |
+| `EVENTSUB_WS_URL` | No | WebSocket address. Blank means `wss://eventsub.wss.twitch.tv/ws`. |
 | `TWITCH_CLIENT_SECRET` | For Play a Clip and `clips.py` | App client secret from the Twitch console. Falls back to `SECRET`. |
 | `CLIP_REWARD_TITLE` | No | Reward title to listen for. Blank means `Play a Clip`. |
 | `ELEVENLABS_API_KEY` / `ELEVENLABS_VOICE_ID` | No | Paid TTS. Blank uses edge-tts. |
@@ -155,31 +153,43 @@ New names you will see in `.env.example`:
 | `COUNSEL_DAILY_CAP` | No | Monk calls per local day. Blank means 100. |
 | `GEMINI_PROJECT_DAILY_CAP` | No | Monk + Benito calls per local day. Blank means 900, so a busy night leaves room for Benito. |
 
-### 4. Start ngrok and update the endpoint ⚠️
-Twitch has to reach your PC over the internet, so ngrok gives your local server a public HTTPS address.
-
-```bash
-ngrok http 5000
-```
-
-ngrok prints a **Forwarding** address like `https://abc123.ngrok-free.app`. Put it in `.env` with `/webhook` on the end:
-
-```
-WEBHOOK_URL=https://abc123.ngrok-free.app/webhook
-```
-
-ngrok forwards the **whole** port. This server only accepts `POST /webhook` from that tunnel. `GET /events`, `/tts`, `/translate`, `/counsel`, `/credits`, `/voice_lines/...`, and `/widgets/...` return 403 if the request carries `X-Forwarded-For` or `X-Forwarded-Host`, or if it did not come from this machine. Point OBS and widgets at `http://localhost:5000` or `http://127.0.0.1:5000`, not the ngrok URL.
-
-> **Important:** Unless you have a reserved ngrok domain, this address **changes every time ngrok restarts**. Each time it does:
-> 1. Update `WEBHOOK_URL` in `.env`.
-> 2. Run `python unsubscribe.py` to clear the old subscription that points to the dead address.
-> 3. Restart the server (next step), which subscribes again with the new address.
-
-### 5. Launch
+### 4. Launch
 ```bash
 python Server.py
 ```
-You should see a success line for each subscription (or `Already subscribed` if it was already active). Redeem a reward on your channel to test it.
+
+The server listens on `127.0.0.1:5000` only. Point OBS and widgets at `http://localhost:5000` or `http://127.0.0.1:5000`. A request with `X-Forwarded-For` or `X-Forwarded-Host`, or from any other machine, gets 403.
+
+You should see a welcome line with a session id, then one `subscribed` line per event type (or `Already subscribed` if that type was already active). Redeem a reward on your channel to test it.
+
+If the socket drops, the client waits and tries again. The wait doubles each time and stops growing at 30 seconds. A fresh session creates the subscriptions again. If Twitch sends `session_reconnect`, the client connects to the new URL, keeps the subscriptions it already has, and closes the old socket only after the new welcome.
+
+### 5. Optional: fire events with the Twitch CLI mock
+
+Leave `EVENTSUB_WS_URL` blank for a real channel. To practice without redeeming, the [Twitch CLI](https://dev.twitch.tv/docs/cli/websocket-event-command) can pretend to be EventSub.
+
+In one terminal:
+
+```bash
+twitch event websocket start-server
+```
+
+The mock prints `Connect to the WebSocket server at: ws://127.0.0.1:8080/ws`. Put that in `.env`:
+
+```
+EVENTSUB_WS_URL=ws://127.0.0.1:8080/ws
+```
+
+Start `python Server.py` and wait for the welcome line. In another terminal, with the server still running:
+
+```bash
+twitch event trigger channel.follow --transport=websocket
+twitch event trigger channel.channel_points_custom_reward_redemption.add --transport=websocket
+```
+
+The trigger reaches every client connected to the mock. You can target one session with `--session=` and the id from the welcome line.
+
+Subscription POSTs still go to real Twitch Helix. The mock's session id is not a real Twitch session, so those lines usually fail while you are on the mock. The trigger is still delivered. Clear `EVENTSUB_WS_URL` when you want real Twitch again. Real `subscribed` lines are the check that your user token and scopes are right.
 
 ### 6. End credits in OBS
 1. In OBS, add a **Browser** source. Do not check "Local file".
@@ -188,7 +198,7 @@ You should see a success line for each subscription (or `Already subscribed` if 
 4. Check **Shutdown source when not visible** and **Refresh browser when scene becomes active** if you want a clean crawl each time you show it.
 5. The page background is transparent. Leave custom CSS empty unless you want to restyle it.
 6. The page polls `http://localhost:5000/credits.json` every few seconds and scrolls Subs, Gifted Subs, Bits, and Follows like movie credits.
-7. At the start of the next stream, clear the roll from this PC (not through ngrok):
+7. At the start of the next stream, clear the roll from this PC:
 
 ```bash
 curl -X POST http://127.0.0.1:5000/credits/reset
@@ -212,7 +222,7 @@ http://localhost:5000/widgets/<widget>/index.html
 http://localhost:5000/widgets/orc-clip/index.html
 ```
 
-Use `http://127.0.0.1:5000/...` if `localhost` misbehaves. Do not use the ngrok URL. The route only serves files inside `WIDGETS_DIR` (`send_from_directory` blocks `..`). Responses send `Cache-Control: no-store`, so an OBS "Refresh cache of current page" picks up edits.
+Use `http://127.0.0.1:5000/...` if `localhost` misbehaves. The route only serves files inside `WIDGETS_DIR` (`send_from_directory` blocks `..`). Responses send `Cache-Control: no-store`, so an OBS "Refresh cache of current page" picks up edits.
 
 ### 9. Ask the Monk
 Create a channel point reward named **Ask the Monk** with "Require viewer to enter text" on. The widget reads that redemption from `/events` and calls `GET /counsel`. The server uses the same `GEMINI_API_KEY` as Benito. It never sends the key to the widget. A blocked word, a viewer who just asked, a full daily cap, or any Gemini error returns one of 30 canned sayings (`"source": "canned"`) instead. Counts for the monk and Benito share `gemini_usage.json` (gitignored). The monk voice on `/tts` is `en-HK-SamNeural`.
@@ -223,7 +233,7 @@ curl "http://localhost:5000/counsel?q=tank%20or%20healer&user=test"
 
 ## 🧪 Tests
 
-Example tests live in `tests/`. The guide in [`tests/README.md`](tests/README.md) explains what a unit test is, what a mock is, how to run them, and walks through one test line by line. [`tests.txt`](tests.txt) is the list to write next.
+Example tests live in `tests/`. The guide in [`tests/README.md`](tests/README.md) explains what a unit test is, what a mock is, how to run them, and walks through one test line by line.
 
 ```bash
 pip install -r requirements-dev.txt

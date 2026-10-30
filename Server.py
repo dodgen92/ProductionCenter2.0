@@ -1,6 +1,5 @@
 import asyncio
 import hashlib
-import hmac
 import ipaddress
 import json
 import os
@@ -11,12 +10,12 @@ import time
 import subprocess
 import threading
 from collections import OrderedDict, deque
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Thread
 from urllib.parse import quote
 
 import requests
+import websocket
 from dotenv import load_dotenv
 from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory
 
@@ -34,7 +33,6 @@ load_dotenv(dotenv_path=BASE_DIR / ".env")
 TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
 TWITCH_OAUTH_TOKEN = os.getenv("TWITCH_OAUTH_TOKEN")
 BROADCASTER_USER_ID = os.getenv("BROADCASTER_USER_ID")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 ARCHIVE_SCRIPT = BASE_DIR / "archive.py"
 CREDITS_FILE = BASE_DIR / "stream_credits.json"
@@ -42,11 +40,15 @@ BANNED_WORDS_FILE = BASE_DIR / "banned_words.txt"
 VOICE_LINES_DIR = BASE_DIR / "voice_lines"
 CREDITS_PAGE = BASE_DIR / "credits.html"
 
-# EventSub signatures use EVENTSUB_SECRET. Older .env files only have SECRET,
-# which was also the Twitch client secret in clips.py. Fall back so those
-# files keep verifying. Set both names when you can split the two jobs.
-def get_eventsub_secret():
-    return os.getenv("EVENTSUB_SECRET") or os.getenv("SECRET") or ""
+# Twitch's real EventSub WebSocket. EVENTSUB_WS_URL overrides this for a local mock.
+DEFAULT_EVENTSUB_WS_URL = "wss://eventsub.wss.twitch.tv/ws"
+
+
+def eventsub_ws_url():
+    """Where the EventSub client connects. Blank means Twitch."""
+
+    configured = (os.getenv("EVENTSUB_WS_URL") or "").strip()
+    return configured or DEFAULT_EVENTSUB_WS_URL
 
 
 def clip_reward_title():
@@ -918,7 +920,7 @@ def counsel():
 
 
 # =============================
-# TUNNEL GUARD
+# LOCALHOST ONLY
 # =============================
 
 def _is_loopback(addr):
@@ -934,7 +936,11 @@ def _is_loopback(addr):
 
 
 def _request_is_local():
-    """True for OBS on this PC. False when ngrok forwarded the request."""
+    """True when this PC called the server directly.
+
+    A forwarding header means some other hop sent the request on.
+    Flask is also bound to 127.0.0.1, so the internet cannot reach it.
+    """
 
     if request.headers.get("X-Forwarded-For") or request.headers.get("X-Forwarded-Host"):
         return False
@@ -942,82 +948,22 @@ def _request_is_local():
 
 
 @app.before_request
-def tunnel_guard():
-    """ngrok exposes the whole port. Only POST /webhook is allowed from the internet."""
+def localhost_only():
+    """OBS and the widgets on this PC are the only callers."""
 
-    if request.path == "/webhook" and request.method == "POST":
-        return None
     if _request_is_local():
         return None
     return jsonify({"error": "local only"}), 403
 
 
 # =============================
-# EVENTSUB WEBHOOK
+# EVENTSUB MESSAGES
 # =============================
 
-MAX_EVENT_AGE = timedelta(minutes=10)
 MAX_SEEN_MESSAGES = 1000
 _seen_ids = deque()
 _seen_set = set()
 _seen_lock = threading.Lock()
-
-
-def signature_matches(raw_body):
-    """HMAC-SHA256 of message id + timestamp + raw body, compared in constant time."""
-
-    secret = get_eventsub_secret()
-    if not secret:
-        return False
-    message_id = request.headers.get("Twitch-Eventsub-Message-Id", "")
-    timestamp = request.headers.get("Twitch-Eventsub-Message-Timestamp", "")
-    signature = request.headers.get("Twitch-Eventsub-Message-Signature", "")
-    if not isinstance(signature, str) or not signature:
-        return False
-    digest = hmac.new(
-        secret.encode("utf-8"),
-        message_id.encode("utf-8") + timestamp.encode("utf-8") + raw_body,
-        hashlib.sha256,
-    ).hexdigest()
-    expected = "sha256=" + digest
-    return hmac.compare_digest(expected, signature)
-
-
-def parse_eventsub_timestamp(value):
-    """Twitch sends RFC3339 with nanoseconds. Python 3.10 only accepts microseconds."""
-
-    if not value or not isinstance(value, str):
-        return None
-    text = value.strip()
-    if text.endswith(("Z", "z")):
-        text = text[:-1] + "+00:00"
-    if "." in text:
-        head, tail = text.split(".", 1)
-        digits = []
-        rest = ""
-        for index, char in enumerate(tail):
-            if char.isdigit():
-                digits.append(char)
-            else:
-                rest = tail[index:]
-                break
-        fraction = "".join(digits[:6])
-        text = f"{head}.{fraction}{rest}" if fraction else f"{head}{rest}"
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
-
-
-def timestamp_is_stale(value):
-    parsed = parse_eventsub_timestamp(value)
-    if parsed is None:
-        return True
-    age = datetime.now(timezone.utc) - parsed
-    return age > MAX_EVENT_AGE
 
 
 def already_seen(message_id):
@@ -1145,52 +1091,32 @@ def handle_notification(sub_type, event):
     print(f"[Server] No handler for EventSub type: {sub_type}")
 
 
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    raw_body = request.get_data() or b""
+def deliver_eventsub_message(message_type, data):
+    """Run the reward, credits, and /events code for one Twitch message.
 
-    if not signature_matches(raw_body):
-        print("[Server] Rejected webhook: bad signature")
-        return jsonify({"error": "invalid signature"}), 403
+    `data` is the object that holds `subscription` and `event`.
+    The WebSocket client calls this for a notification or a revocation.
+    """
 
-    message_id = request.headers.get("Twitch-Eventsub-Message-Id", "")
-    timestamp = request.headers.get("Twitch-Eventsub-Message-Timestamp", "")
-    if not message_id or timestamp_is_stale(timestamp):
-        print("[Server] Rejected webhook: stale or incomplete message")
-        return jsonify({"error": "stale or incomplete message"}), 403
-
-    if already_seen(message_id):
-        return "", 204
-
-    try:
-        data = json.loads(raw_body) if raw_body else {}
-    except json.JSONDecodeError:
-        return jsonify({"error": "invalid json"}), 400
     if not isinstance(data, dict):
         data = {}
 
-    message_type = request.headers.get("Twitch-Eventsub-Message-Type", "")
-
-    if message_type == "webhook_callback_verification":
-        challenge = data.get("challenge", "")
-        if not isinstance(challenge, str):
-            challenge = ""
-        return Response(challenge, status=200, mimetype="text/plain")
-
     if message_type == "revocation":
         log_revocation(data)
-        return jsonify({"message": "revocation received"}), 200
+        return
 
     if message_type == "notification":
         event = data.get("event") or {}
-        sub_type = (data.get("subscription") or {}).get("type", "")
+        if not isinstance(event, dict):
+            event = {}
+        subscription = data.get("subscription") or {}
+        sub_type = subscription.get("type", "") if isinstance(subscription, dict) else ""
         print("EventSub event received:")
         print(json.dumps(event, indent=2))
         handle_notification(sub_type, event)
-        return jsonify({"message": "Event received"}), 200
+        return
 
     print(f"[Server] Unknown EventSub message type: {message_type}")
-    return jsonify({"message": "ignored"}), 200
 
 
 # =============================
@@ -1200,10 +1126,9 @@ def webhook():
 EVENTSUB_URL = "https://api.twitch.tv/helix/eventsub/subscriptions"
 
 
-def subscribe_event(sub_type, version, condition):
-    """One Helix subscription. Same headers and webhook transport every time."""
+def subscribe_event(sub_type, version, condition, session_id):
+    """One Helix subscription on the open WebSocket session."""
 
-    secret = get_eventsub_secret()
     headers = {
         "Client-ID": TWITCH_CLIENT_ID,
         "Authorization": f"Bearer {TWITCH_OAUTH_TOKEN}",
@@ -1214,9 +1139,8 @@ def subscribe_event(sub_type, version, condition):
         "version": version,
         "condition": condition,
         "transport": {
-            "method": "webhook",
-            "callback": WEBHOOK_URL,
-            "secret": secret,
+            "method": "websocket",
+            "session_id": session_id,
         },
     }
 
@@ -1234,26 +1158,36 @@ def subscribe_event(sub_type, version, condition):
         return
 
     if response.status_code in (200, 202):
-        print(f"✅ EventSub subscription successful: {sub_type}")
+        print(f"✅ EventSub subscribed: {sub_type}")
     elif response.status_code == 409:
         print(f"✅ Already subscribed: {sub_type}")
     else:
         print(f"❌ EventSub subscription failed: {sub_type}")
         print(response.status_code)
         print(response.text)
+        if response.status_code in (401, 403):
+            print(
+                "[Server] WebSocket subscriptions need the broadcaster user token "
+                "in TWITCH_OAUTH_TOKEN. An app access token will not work."
+            )
 
 
-def subscribe_to_events():
-    """Subscribe on startup. The token in TWITCH_OAUTH_TOKEN must have the scopes in the README."""
+def subscribe_to_events(session_id):
+    """Create every subscription on this WebSocket session.
 
+    TWITCH_OAUTH_TOKEN must be a user access token for the broadcaster,
+    with the scopes in the README. An app access token cannot do this.
+    """
+
+    if not isinstance(session_id, str) or not session_id:
+        print("❌ EventSub session_id is missing. Skipping subscriptions.")
+        return
     if not TWITCH_CLIENT_ID or not TWITCH_OAUTH_TOKEN:
         print("❌ TWITCH_CLIENT_ID or TWITCH_OAUTH_TOKEN is missing. Skipping subscriptions.")
+        print("[Server] EventSub WebSocket needs the broadcaster user token, not an app token.")
         return
-    if not WEBHOOK_URL:
-        print("❌ WEBHOOK_URL is missing. Skipping subscriptions.")
-        return
-    if not get_eventsub_secret():
-        print("❌ EVENTSUB_SECRET or SECRET is missing. Skipping subscriptions.")
+    if not BROADCASTER_USER_ID:
+        print("❌ BROADCASTER_USER_ID is missing. Skipping subscriptions.")
         return
 
     broadcaster = {"broadcaster_user_id": BROADCASTER_USER_ID}
@@ -1263,12 +1197,308 @@ def subscribe_to_events():
         "moderator_user_id": BROADCASTER_USER_ID,
     }
 
-    subscribe_event("channel.channel_points_custom_reward_redemption.add", "1", broadcaster)
-    subscribe_event("channel.follow", "2", follow_condition)
-    subscribe_event("channel.subscribe", "1", broadcaster)
-    subscribe_event("channel.subscription.gift", "1", broadcaster)
-    subscribe_event("channel.subscription.message", "1", broadcaster)
-    subscribe_event("channel.cheer", "1", broadcaster)
+    subscribe_event("channel.channel_points_custom_reward_redemption.add", "1", broadcaster, session_id)
+    subscribe_event("channel.follow", "2", follow_condition, session_id)
+    subscribe_event("channel.subscribe", "1", broadcaster, session_id)
+    subscribe_event("channel.subscription.gift", "1", broadcaster, session_id)
+    subscribe_event("channel.subscription.message", "1", broadcaster, session_id)
+    subscribe_event("channel.cheer", "1", broadcaster, session_id)
+
+
+# =============================
+# EVENTSUB WEBSOCKET
+# =============================
+
+class EventSubClient:
+    """Twitch EventSub over a WebSocket, on a background thread.
+
+    We connect out to Twitch. Twitch does not call back into this PC,
+    so there is no public URL. Do not send chat or other text on this
+    socket. Twitch closes clients that do. Subscriptions go through Helix.
+    """
+
+    def __init__(self):
+        self.url = eventsub_ws_url()
+        # Twitch's usual window. The welcome message replaces this.
+        self.keepalive_timeout = 10
+        self.last_message_at = None
+        self.backoff = 1
+        self.recv_timeout = 1
+        self.connect_timeout = 15
+        # Twitch gives us a short time to finish a session_reconnect.
+        self.reconnect_welcome_wait = 30
+        self._ws = None
+        self._stop = threading.Event()
+        self._thread = None
+        # True only while reading the welcome on a reconnect socket.
+        self._keep_subscriptions = False
+
+    def start(self):
+        """Open the socket on a daemon thread so Flask can keep serving."""
+
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = Thread(
+            target=self.run,
+            name="eventsub-websocket",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        ws = self._ws
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception:
+                pass
+
+    def run(self):
+        """Stay connected. A drop waits, then starts a fresh session."""
+
+        print("[Server] EventSub WebSocket client starting.")
+        while not self._stop.is_set():
+            self._connect_and_read()
+            if self._stop.is_set():
+                break
+            delay = 30 if self.backoff > 30 else self.backoff
+            self.backoff = self.backoff * 2
+            if self.backoff > 30:
+                self.backoff = 30
+            print(
+                f"[Server] EventSub dropped. Reconnecting in {delay:g}s "
+                "and creating subscriptions again."
+            )
+            if self._stop.wait(delay):
+                break
+        print("[Server] EventSub WebSocket client stopped.")
+
+    def _connect_and_read(self):
+        url = eventsub_ws_url()
+        self.url = url
+        print(f"[Server] EventSub connecting to {url}")
+        try:
+            ws = self._open_socket(url)
+        except Exception as exc:
+            print(f"[Server] EventSub connection failed: {exc}")
+            return
+
+        self._ws = ws
+        self.last_message_at = time.monotonic()
+        try:
+            while not self._stop.is_set():
+                current = self._ws
+                if current is None:
+                    return
+                try:
+                    raw = current.recv()
+                except websocket.WebSocketTimeoutException:
+                    if current is not self._ws:
+                        continue
+                    if self._keepalive_expired():
+                        print(
+                            "[Server] No EventSub message for "
+                            f"{self.keepalive_timeout:g}s. Reconnecting."
+                        )
+                        return
+                    continue
+                except Exception as exc:
+                    if current is not self._ws:
+                        continue
+                    print(f"[Server] EventSub socket closed: {exc}")
+                    return
+
+                # session_reconnect may have swapped in a new socket.
+                if current is not self._ws:
+                    continue
+                if not raw:
+                    print("[Server] EventSub socket closed.")
+                    return
+                self.last_message_at = time.monotonic()
+                self._handle_raw(raw)
+        finally:
+            current = self._ws
+            if current is not None:
+                try:
+                    current.close()
+                except Exception:
+                    pass
+                self._ws = None
+
+    def _keepalive_expired(self):
+        """True when no message has arrived inside keepalive_timeout_seconds."""
+
+        if self.last_message_at is None:
+            return False
+        limit = self.keepalive_timeout
+        if not isinstance(limit, (int, float)) or isinstance(limit, bool) or limit <= 0:
+            limit = 10
+        return (time.monotonic() - self.last_message_at) >= limit
+
+    def _handle_raw(self, raw):
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="replace")
+        try:
+            message = json.loads(raw)
+        except json.JSONDecodeError:
+            print("[Server] EventSub sent a message that was not JSON.")
+            return
+        if not isinstance(message, dict):
+            print("[Server] EventSub sent a message that was not an object.")
+            return
+        self.handle_message(message)
+
+    def handle_message(self, message):
+        """Route one parsed EventSub message. Returns a short status word."""
+
+        if not isinstance(message, dict):
+            return "ignored"
+
+        self.last_message_at = time.monotonic()
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        payload = message.get("payload") if isinstance(message.get("payload"), dict) else {}
+        message_id = metadata.get("message_id") or ""
+        message_type = metadata.get("message_type") or ""
+
+        # The same id can be delivered twice. The second one does no work.
+        if isinstance(message_id, str) and message_id and already_seen(message_id):
+            return "duplicate"
+
+        if message_type == "session_welcome":
+            self._on_welcome(payload)
+            return "welcome"
+
+        if message_type == "session_keepalive":
+            return "keepalive"
+
+        if message_type == "session_reconnect":
+            self._begin_reconnect(payload)
+            return "reconnect"
+
+        if message_type in ("notification", "revocation"):
+            # subscription_type lives on metadata too. Prefer the payload,
+            # and fill it in when the payload left the type blank.
+            if message_type == "notification":
+                subscription = payload.get("subscription")
+                if not isinstance(subscription, dict):
+                    subscription = {}
+                    payload = dict(payload)
+                    payload["subscription"] = subscription
+                if not subscription.get("type"):
+                    subscription["type"] = metadata.get("subscription_type") or ""
+            deliver_eventsub_message(message_type, payload)
+            return message_type
+
+        print(f"[Server] Unknown EventSub message type: {message_type}")
+        return "ignored"
+
+    def _on_welcome(self, payload):
+        session = payload.get("session") if isinstance(payload.get("session"), dict) else {}
+        session_id = session.get("id") if isinstance(session.get("id"), str) else ""
+        timeout = session.get("keepalive_timeout_seconds")
+        if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) and timeout > 0:
+            self.keepalive_timeout = float(timeout)
+        # A healthy welcome means the next drop can retry quickly.
+        self.backoff = 1
+
+        if self._keep_subscriptions:
+            print(
+                "[Server] EventSub welcome on the new socket. "
+                f"session_id={session_id}. Keeping current subscriptions."
+            )
+            return
+
+        print(f"[Server] EventSub welcome. session_id={session_id}")
+        if not session_id:
+            print("[Server] EventSub welcome had no session id. Not subscribing.")
+            return
+        subscribe_to_events(session_id)
+        self.last_message_at = time.monotonic()
+
+    def _begin_reconnect(self, payload):
+        """Connect to Twitch's new URL, then close the old socket.
+
+        Subscriptions move with the session. Do not create them again.
+        The old socket stays open until the new one says welcome.
+        """
+
+        session = payload.get("session") if isinstance(payload.get("session"), dict) else {}
+        new_url = session.get("reconnect_url") if isinstance(session.get("reconnect_url"), str) else ""
+        new_url = new_url.strip()
+        if not new_url:
+            print("[Server] EventSub reconnect message had no URL.")
+            return
+
+        old_ws = self._ws
+        print(f"[Server] EventSub session_reconnect. Connecting to {new_url}")
+        try:
+            new_ws = self._open_socket(new_url)
+        except Exception as exc:
+            print(f"[Server] EventSub could not open the reconnect URL: {exc}")
+            return
+
+        if not self._read_until_welcome(new_ws):
+            print("[Server] EventSub reconnect did not get a welcome. Staying on the old socket.")
+            try:
+                new_ws.close()
+            except Exception:
+                pass
+            return
+
+        self.url = new_url
+        self._ws = new_ws
+        if old_ws is not None and old_ws is not new_ws:
+            try:
+                old_ws.close()
+            except Exception as exc:
+                print(f"[Server] Could not close the old EventSub socket: {exc}")
+        print("[Server] EventSub is on the new socket. Old subscriptions are still active.")
+
+    def _open_socket(self, url):
+        """Connect, then use a short read timeout so a quiet socket is noticed.
+
+        The handshake to Twitch can take longer than the keepalive window,
+        so connect and read do not share one timeout.
+        """
+
+        ws = websocket.create_connection(url, timeout=self.connect_timeout)
+        ws.settimeout(self.recv_timeout)
+        return ws
+
+    def _read_until_welcome(self, new_ws):
+        deadline = time.monotonic() + self.reconnect_welcome_wait
+        while time.monotonic() < deadline and not self._stop.is_set():
+            try:
+                raw = new_ws.recv()
+            except websocket.WebSocketTimeoutException:
+                continue
+            except Exception as exc:
+                print(f"[Server] EventSub reconnect socket failed: {exc}")
+                return False
+            if not raw:
+                print("[Server] EventSub reconnect socket closed before welcome.")
+                return False
+            try:
+                message = json.loads(raw)
+            except json.JSONDecodeError:
+                print("[Server] EventSub reconnect sent a message that was not JSON.")
+                continue
+            if not isinstance(message, dict):
+                continue
+            metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+            if metadata.get("message_type") == "session_welcome":
+                self._keep_subscriptions = True
+                try:
+                    self.handle_message(message)
+                finally:
+                    self._keep_subscriptions = False
+                return True
+            # Anything else before welcome is still a real message.
+            if metadata.get("message_type") != "session_reconnect":
+                self.handle_message(message)
+        return False
 
 
 # =============================
@@ -1278,15 +1508,17 @@ def subscribe_to_events():
 if __name__ == "__main__":
     print("Starting Production Center server...")
 
-    subscribe_to_events()
+    eventsub_client = EventSubClient()
+    eventsub_client.start()
 
     try:
         app.run(
-            host="0.0.0.0",
+            host="127.0.0.1",
             port=5000,
             debug=False,
             use_reloader=False,
         )
 
     finally:
+        eventsub_client.stop()
         stop_archive()
