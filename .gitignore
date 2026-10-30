@@ -10,7 +10,19 @@ venv/
 # Python cache
 __pycache__/
 *.py[cod]
+.pytest_cache/
 
 # IDE
 .vscode/
 .idea/
+
+# Spoken audio and per-stream credits (viewer names)
+tts_cache/
+stream_credits.json
+
+# Recorded presenter lines. Keep the folder README and .gitkeep.
+voice_lines/*
+!voice_lines/orc/
+voice_lines/orc/*
+!voice_lines/orc/.gitkeep
+!voice_lines/orc/README.md

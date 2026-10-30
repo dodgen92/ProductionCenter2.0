@@ -6,20 +6,31 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-CLIENT_ID = os.getenv("TWITCH_CLIENT_ID")
-CLIENT_SECRET = os.getenv("SECRET")
-
+# SECRET used to be both the EventSub webhook secret and this app's client
+# secret. Prefer TWITCH_CLIENT_SECRET. Fall back to SECRET so an old .env
+# keeps working until the two values are split.
 GAME_ID = "18122"
 
 
+def _client_id():
+    return os.getenv("TWITCH_CLIENT_ID")
+
+
+def _client_secret():
+    return os.getenv("TWITCH_CLIENT_SECRET") or os.getenv("SECRET")
+
+
 def get_app_token():
+    """App access token (client credentials). Same call Play a Clip uses."""
+
     response = requests.post(
         "https://id.twitch.tv/oauth2/token",
         params={
-            "client_id": CLIENT_ID,
-            "client_secret": CLIENT_SECRET,
-            "grant_type": "client_credentials"
-        }
+            "client_id": _client_id(),
+            "client_secret": _client_secret(),
+            "grant_type": "client_credentials",
+        },
+        timeout=15,
     )
 
     response.raise_for_status()
@@ -33,19 +44,44 @@ def get_top_wow_clips(token):
     response = requests.get(
         "https://api.twitch.tv/helix/clips",
         headers={
-            "Client-ID": CLIENT_ID,
-            "Authorization": f"Bearer {token}"
+            "Client-ID": _client_id(),
+            "Authorization": f"Bearer {token}",
         },
         params={
             "game_id": GAME_ID,
             "started_at": yesterday.isoformat().replace("+00:00", "Z"),
             "ended_at": now.isoformat().replace("+00:00", "Z"),
-            "first": 10
-        }
+            "first": 10,
+        },
+        timeout=15,
     )
 
     response.raise_for_status()
     return response.json()["data"]
+
+
+def get_broadcaster_clips(token, broadcaster_id):
+    """Clips from one channel, most-viewed first. Play a Clip picks one at random.
+
+    Dates are left off on purpose. Helix then returns the top clips by views.
+    If started_at is set without ended_at, Twitch only looks one week ahead.
+    """
+
+    response = requests.get(
+        "https://api.twitch.tv/helix/clips",
+        headers={
+            "Client-ID": _client_id(),
+            "Authorization": f"Bearer {token}",
+        },
+        params={
+            "broadcaster_id": broadcaster_id,
+            "first": 100,
+        },
+        timeout=15,
+    )
+
+    response.raise_for_status()
+    return response.json().get("data", [])
 
 
 if __name__ == "__main__":

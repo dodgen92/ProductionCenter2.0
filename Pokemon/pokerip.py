@@ -24,7 +24,10 @@ TOTAL_POKEMON = 151
 load_dotenv()
 
 OBS_HOST = os.getenv("OBS_HOST")
-OBS_PORT = int(os.getenv("OBS_PORT"))
+# Leave the port empty until a card is actually shown. int(None) would crash
+# Server.py at import when OBS_PORT is unset, before OBS is even needed.
+_obs_port = os.getenv("OBS_PORT")
+OBS_PORT = int(_obs_port) if _obs_port else None
 OBS_PASSWORD = os.getenv("OBS_PASSWORD")
 
 SCENE_NAME = "MAIN"
