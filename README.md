@@ -69,7 +69,6 @@ CameraFilters/         Random filter picker, clear script, AutoHotkey filter hot
 sheetripper.py         Utility: cut card sheets into single card images
 unsubscribe.py         Utility: remove old EventSub subscriptions
 tests/                 Example pytest tests and a short guide
-tests.txt              More tests to write yourself
 ```
 
 `tts_cache/` and `stream_credits.json` are created at runtime and gitignored. `stream_credits.json` holds viewer display names for the current roll.
@@ -223,7 +222,7 @@ curl "http://localhost:5000/counsel?q=tank%20or%20healer&user=test"
 
 ## 🧪 Tests
 
-Example tests live in `tests/`. The guide in [`tests/README.md`](tests/README.md) explains what a unit test is, what a mock is, how to run them, and walks through one test line by line. [`tests.txt`](tests.txt) is the list to write next.
+Example tests live in `tests/`. The guide in [`tests/README.md`](tests/README.md) explains what a unit test is, what a mock is, how to run them, and walks through one test line by line.
 
 ```bash
 pip install -r requirements-dev.txt

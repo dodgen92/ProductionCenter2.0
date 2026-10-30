@@ -27,3 +27,6 @@ voice_lines/*
 voice_lines/orc/*
 !voice_lines/orc/.gitkeep
 !voice_lines/orc/README.md
+
+# Local test notes. Do not commit.
+tests.txt

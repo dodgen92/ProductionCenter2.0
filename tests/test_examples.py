@@ -1,4 +1,4 @@
-"""Example unit tests. Read tests/README.md, then pick the next one from tests.txt."""
+"""Example unit tests. Read tests/README.md."""
 
 import hashlib
 import hmac
