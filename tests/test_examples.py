@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+import gemini_usage
 import Server
 
 # Must match EVENTSUB_SECRET in tests/conftest.py.
@@ -42,7 +43,9 @@ def clean_server_state(monkeypatch, tmp_path):
     with Server._seen_lock:
         Server._seen_ids.clear()
         Server._seen_set.clear()
+    Server._counsel_last_ask.clear()
     monkeypatch.setattr(Server, "CREDITS_FILE", tmp_path / "stream_credits.json")
+    monkeypatch.setattr(gemini_usage, "USAGE_FILE", tmp_path / "gemini_usage.json")
 
 
 @pytest.fixture
@@ -282,3 +285,94 @@ def test_widgets_are_local_files_inside_one_folder(client, monkeypatch, tmp_path
 
     # Assert
     assert forwarded.status_code == 403
+
+
+def test_counsel_blocked_word_does_not_call_gemini(client, monkeypatch, tmp_path):
+    """A banned word gets a canned saying. Gemini is never called, and the word is not echoed."""
+
+    # Arrange: one banned word, and a Gemini stand-in that fails the test if it is used.
+    words = tmp_path / "banned.txt"
+    words.write_text("nope\n", encoding="utf-8")
+    monkeypatch.setattr(Server, "BANNED_WORDS_FILE", words)
+    Server._banned_cache["mtime"] = None
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    def fake_post(*args, **kwargs):
+        raise AssertionError("Gemini should not be called for a blocked question")
+
+    monkeypatch.setattr(Server.requests, "post", fake_post)
+
+    # Act
+    response = client.get("/counsel", query_string={"q": "is this nope okay", "user": "Remy"})
+
+    # Assert
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["source"] == "canned"
+    assert body["answer"] in Server.MONK_SAYINGS
+    assert "nope" not in body["answer"].lower()
+    assert response.headers["Access-Control-Allow-Origin"] == "*"
+    assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_counsel_cooldown_returns_canned(client, monkeypatch):
+    """The same viewer gets one Gemini answer, then a canned saying until the cooldown ends."""
+
+    # Arrange: Gemini returns one fixed sentence. The key here is fake.
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("COUNSEL_USER_COOLDOWN", "60")
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "candidates": [{
+                    "content": {"parts": [{"text": "Sip your tea, then decide."}]},
+                }],
+            }
+
+    def fake_post(url, headers=None, timeout=None, json=None, **kwargs):
+        calls.append(url)
+        return FakeResponse()
+
+    monkeypatch.setattr(Server.requests, "post", fake_post)
+
+    # Act
+    first = client.get("/counsel", query_string={"q": "tank or healer", "user": "Remy"})
+    second = client.get("/counsel", query_string={"q": "what about dps", "user": "Remy"})
+
+    # Assert
+    assert first.status_code == 200
+    assert first.get_json() == {
+        "answer": "Sip your tea, then decide.",
+        "source": "gemini",
+    }
+    assert second.status_code == 200
+    assert second.get_json()["source"] == "canned"
+    assert second.get_json()["answer"] in Server.MONK_SAYINGS
+    assert len(calls) == 1
+
+
+def test_counsel_is_blocked_through_the_tunnel(client, monkeypatch):
+    """ngrok cannot spend the Gemini quota. A forwarded /counsel is refused."""
+
+    # Arrange: a key is set, and any real call would fail this test.
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    def fake_post(*args, **kwargs):
+        raise AssertionError("Gemini should not be called through the tunnel")
+
+    monkeypatch.setattr(Server.requests, "post", fake_post)
+
+    # Act
+    response = client.get(
+        "/counsel",
+        query_string={"q": "tank or healer", "user": "Remy"},
+        headers={"X-Forwarded-For": "203.0.113.5"},
+    )
+
+    # Assert
+    assert response.status_code == 403

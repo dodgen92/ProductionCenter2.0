@@ -151,3 +151,28 @@ Easiest first. Do not need OBS, Twitch, or the network. Mock those.
     What: nested files work, and you do not get a file listing.
     Hint: temp WIDGETS_DIR with orc/index.html and orc/app.js. GET both files, then GET /widgets/orc/.
     Expect: both files are 200 with Cache-Control no-store. The folder URL is 404.
+
+31. An empty monk question is canned
+    What: GET /counsel with no q does not call Gemini.
+    Hint: route counsel(). Mock requests.post so a call fails the test. Leave GEMINI_API_KEY set to a fake value.
+    Expect: status 200, source "canned", and the mock was not called.
+
+32. The monk stops at the daily cap
+    What: COUNSEL_DAILY_CAP blocks another Gemini call.
+    Hint: monkeypatch.setenv("COUNSEL_DAILY_CAP", "1"), point gemini_usage.USAGE_FILE at tmp_path, call gemini_usage("monk", bump=True) once, then GET /counsel. Mock requests.post.
+    Expect: source "canned", and requests.post was not called.
+
+33. A Gemini failure still returns a saying
+    What: a timeout or a bad response becomes a canned answer.
+    Hint: mock requests.post to raise requests.Timeout. Set a fake GEMINI_API_KEY.
+    Expect: status 200, source "canned", answer is one of MONK_SAYINGS.
+
+34. A banned word in Gemini's answer is not shown
+    What: the word filter runs on the reply too.
+    Hint: banned word "nope", mock requests.post to return text that contains "nope".
+    Expect: source "canned", and the body does not contain "nope".
+
+35. A huge Gemini answer is cut on a sentence
+    What: trim_counsel_answer keeps about 300 characters and ends on . ! or ?.
+    Hint: call trim_counsel_answer with two sentences, the first under 300 characters and the second past it. No mock.
+    Expect: the result ends with the first sentence's period and is at most 300 characters.

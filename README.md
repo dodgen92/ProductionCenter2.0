@@ -149,6 +149,11 @@ New names you will see in `.env.example`:
 | `ELEVENLABS_API_KEY` / `ELEVENLABS_VOICE_ID` | No | Paid TTS. Blank uses edge-tts. |
 | `DEEPL_API_KEY` | No | Last translation engine. Blank skips DeepL. |
 | `WIDGETS_DIR` | For HTML widgets | Full path to the widgets folder. On this PC that is `C:\Users\tyler\Desktop\Stream-Widgets`. Blank means `/widgets/...` returns 404. |
+| `GEMINI_API_KEY` | For Benito and Ask the Monk | Same key Benito already uses. The monk returns a canned saying if it is blank. |
+| `COUNSEL_MODEL` | No | Blank means `gemini-2.5-flash-lite`. |
+| `COUNSEL_USER_COOLDOWN` | No | Seconds between Gemini answers for one viewer. Blank means 60. |
+| `COUNSEL_DAILY_CAP` | No | Monk calls per local day. Blank means 100. |
+| `GEMINI_PROJECT_DAILY_CAP` | No | Monk + Benito calls per local day. Blank means 900, so a busy night leaves room for Benito. |
 
 ### 4. Start ngrok and update the endpoint ⚠️
 Twitch has to reach your PC over the internet, so ngrok gives your local server a public HTTPS address.
@@ -163,7 +168,7 @@ ngrok prints a **Forwarding** address like `https://abc123.ngrok-free.app`. Put 
 WEBHOOK_URL=https://abc123.ngrok-free.app/webhook
 ```
 
-ngrok forwards the **whole** port. This server only accepts `POST /webhook` from that tunnel. `GET /events`, `/tts`, `/translate`, `/credits`, `/voice_lines/...`, and `/widgets/...` return 403 if the request carries `X-Forwarded-For` or `X-Forwarded-Host`, or if it did not come from this machine. Point OBS and widgets at `http://localhost:5000` or `http://127.0.0.1:5000`, not the ngrok URL.
+ngrok forwards the **whole** port. This server only accepts `POST /webhook` from that tunnel. `GET /events`, `/tts`, `/translate`, `/counsel`, `/credits`, `/voice_lines/...`, and `/widgets/...` return 403 if the request carries `X-Forwarded-For` or `X-Forwarded-Host`, or if it did not come from this machine. Point OBS and widgets at `http://localhost:5000` or `http://127.0.0.1:5000`, not the ngrok URL.
 
 > **Important:** Unless you have a reserved ngrok domain, this address **changes every time ngrok restarts**. Each time it does:
 > 1. Update `WEBHOOK_URL` in `.env`.
@@ -208,6 +213,13 @@ http://localhost:5000/widgets/orc-clip/index.html
 ```
 
 Use `http://127.0.0.1:5000/...` if `localhost` misbehaves. Do not use the ngrok URL. The route only serves files inside `WIDGETS_DIR` (`send_from_directory` blocks `..`). Responses send `Cache-Control: no-store`, so an OBS "Refresh cache of current page" picks up edits.
+
+### 9. Ask the Monk
+Create a channel point reward named **Ask the Monk** with "Require viewer to enter text" on. The widget reads that redemption from `/events` and calls `GET /counsel`. The server uses the same `GEMINI_API_KEY` as Benito. It never sends the key to the widget. A blocked word, a viewer who just asked, a full daily cap, or any Gemini error returns one of 30 canned sayings (`"source": "canned"`) instead. Counts for the monk and Benito share `gemini_usage.json` (gitignored). The monk voice on `/tts` is `en-HK-SamNeural`.
+
+```bash
+curl "http://localhost:5000/counsel?q=tank%20or%20healer&user=test"
+```
 
 ## 🧪 Tests
 

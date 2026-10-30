@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory
 
 import clips
+from gemini_usage import gemini_usage
 from Pokemon.pokerip import catch_pokemon
 
 # =============================
@@ -544,6 +545,7 @@ TTS_VOICES = {
     "zh-TW-HsiaoChenNeural",
     "de-DE-KatjaNeural",
     "nl-NL-ColetteNeural",
+    "en-HK-SamNeural",
 }
 TTS_DEFAULT = "en-US-AriaNeural"
 TTS_MAX = 300
@@ -766,6 +768,153 @@ def translate():
     resp.headers["Access-Control-Allow-Origin"] = "*"
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+# =============================
+# ASK THE MONK
+# =============================
+
+# Same env name Benito already reads. Never print or return this value.
+MONK_PROMPT = """You are Master Brewpaw, a warm, wise, and funny pandaren monk and brewmaster who gives counsel to viewers on
+a World of Warcraft Twitch stream (channel: remyfriend). A viewer named {user} asks you a question.
+Answer in 1-3 sentences, under 45 words total, in natural, fluent, modern English.
+Be kind, playful, and genuinely helpful. Tea, brew, balance, and WoW metaphors are welcome; keep them light.
+Never use broken or "accented" English, stereotypes, or fortune-cookie cliches like "Confucius say".
+Keep it Twitch-safe: no profanity, sexual content, hate, or politics.
+Do not give medical, legal, financial, or crisis advice. If the question touches self-harm, abuse, health,
+or legal trouble, respond gently and encourage them to reach out to someone they trust or a professional or local
+helpline. Never claim to be an AI; you are the monk. Do not repeat the question."""
+
+MONK_SAYINGS = (
+    "A cup poured in a hurry spills on the table. Slow down, and the answer will steep.",
+    "Even the strongest brew starts as plain water and patience.",
+    "When the path is foggy, take the next small step. The mist clears for walkers, not worriers.",
+    "Balance is not standing still. It is a hundred tiny wobbles, corrected with a smile.",
+    "Rest is part of the training. Bamboo grows in the quiet, too.",
+    "If the load is too heavy, share it. Even a monk calls friends to carry the keg.",
+    "You cannot pour from an empty kettle. Refill yourself first.",
+    "Mistakes are just practice wearing a disguise.",
+    "The loudest thought in your head is not always the wisest. Let it cool like tea.",
+    "Laugh at your stumbles. The ground is a patient teacher.",
+    "A wipe is only a lesson with a repair bill.",
+    "Drink some water, stretch your paws, then decide. Most choices taste better after a sip.",
+    "The best time to start was yesterday. The second best is after this cup.",
+    "Do not compare your first brew to another monk's hundredth.",
+    "Some days you are the tank, some days you are the floor. Both get back up.",
+    "Be gentle with yourself. You are the only body you get to level.",
+    "If you cannot decide, flip a coin. Your heart will tell you which side it hoped for.",
+    "Kindness is a brew that never goes stale.",
+    "Wisdom is knowing when to push, and knowing when to go make a snack.",
+    "A good friend is like a good tavern: warm, loud, and always open.",
+    "The mountain is climbed one ledge at a time, and with frequent tea breaks.",
+    "Worry is a rocking chair. Lots of motion, no distance.",
+    "Small habits are like small coins. Save enough and you can buy the epic mount.",
+    "Ask for help early. Pride has never once rezzed anyone.",
+    "A clear mind is like still water. Stop stirring and you will see the bottom.",
+    "Sleep on it. Tomorrow's you is better rested and slightly smarter.",
+    "Every master was once a level one with no idea what the buttons did.",
+    "Do one thing well, then the next. Even a brewmaster only stirs one keg at a time.",
+    "When in doubt, be kind, drink water, and log off at a reasonable hour.",
+    "The journey matters more than the loot. But the loot is nice, too.",
+)
+
+_counsel_last_ask = {}
+
+
+def text_hits_banned_word(text):
+    """True when banned_words.txt would change this text."""
+
+    if not text:
+        return False
+    return censor_viewer_text(text) != text
+
+
+def _counsel_int(name, default):
+    try:
+        return int(os.getenv(name) or default)
+    except ValueError:
+        return int(default)
+
+
+def counsel_answer_json(answer, source):
+    response = jsonify({"answer": answer, "source": source})
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def canned_counsel():
+    return counsel_answer_json(random.choice(MONK_SAYINGS), "canned")
+
+
+def trim_counsel_answer(text, limit=300):
+    """Keep about 300 characters, ending on a sentence when there is one."""
+
+    text = " ".join((text or "").split())
+    if len(text) <= limit:
+        return text
+    window = text[:limit]
+    for mark in (".", "!", "?"):
+        index = window.rfind(mark)
+        if index >= 40:
+            return window[:index + 1].strip()
+    return window.rstrip()
+
+
+def counsel_over_cap():
+    """True when the monk's own cap is hit, or the shared project day is nearly full."""
+
+    mine, total = gemini_usage("monk")
+    if mine >= _counsel_int("COUNSEL_DAILY_CAP", "100"):
+        return True
+    # Free-tier requests are per Google project, shared with Benito.
+    # 900 leaves room under a typical 1,000-request day. Change it in .env.
+    if total >= _counsel_int("GEMINI_PROJECT_DAILY_CAP", "900"):
+        return True
+    return False
+
+
+@app.route("/counsel")
+def counsel():
+    question = (request.args.get("q") or "").strip()[:200]
+    user = (request.args.get("user") or "friend")[:25]
+    if not question or text_hits_banned_word(question):
+        return canned_counsel()
+
+    now = time.time()
+    key = user.lower()
+    if now - _counsel_last_ask.get(key, 0) < _counsel_int("COUNSEL_USER_COOLDOWN", "60"):
+        return canned_counsel()
+
+    if counsel_over_cap():
+        return canned_counsel()
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return canned_counsel()
+
+    _counsel_last_ask[key] = now
+    model = os.getenv("COUNSEL_MODEL") or "gemini-2.5-flash-lite"
+    try:
+        response = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            headers={"x-goog-api-key": api_key},
+            timeout=8,
+            json={
+                "system_instruction": {"parts": [{"text": MONK_PROMPT.format(user=user)}]},
+                "contents": [{"role": "user", "parts": [{"text": question}]}],
+                "generationConfig": {"maxOutputTokens": 120, "temperature": 0.9},
+            },
+        )
+        response.raise_for_status()
+        gemini_usage("monk", bump=True)
+        text = response.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        if not text or text_hits_banned_word(text):
+            return canned_counsel()
+        return counsel_answer_json(trim_counsel_answer(text), "gemini")
+    except Exception as exc:
+        print(f"[Server] Counsel failed: {type(exc).__name__}")
+        return canned_counsel()
 
 
 # =============================

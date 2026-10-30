@@ -57,7 +57,7 @@ A passing run looks like this:
 tests/test_examples.py::test_valid_signature_is_accepted PASSED
 tests/test_examples.py::test_invalid_signature_is_rejected PASSED
 ...
-======= 8 passed in 0.20s =======
+======= 11 passed in 0.20s =======
 ```
 
 `PASSED` means every `assert` in that test was true.

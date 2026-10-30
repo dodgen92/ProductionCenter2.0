@@ -19,6 +19,7 @@ __pycache__/
 # Spoken audio and per-stream credits (viewer names)
 tts_cache/
 stream_credits.json
+gemini_usage.json
 
 # Recorded presenter lines. Keep the folder README and .gitkeep.
 voice_lines/*
