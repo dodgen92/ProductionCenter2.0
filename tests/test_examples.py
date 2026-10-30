@@ -1,35 +1,56 @@
 """Example unit tests. Read tests/README.md."""
 
-import hashlib
-import hmac
 import json
-from datetime import datetime, timezone
 
 import pytest
 
 import gemini_usage
 import Server
 
-# Must match EVENTSUB_SECRET in tests/conftest.py.
-TEST_SECRET = "unit-test-eventsub-secret"
 
+def ws_message(message_type, payload, message_id):
+    """One EventSub WebSocket message, in the shape Twitch sends."""
 
-def signed_headers(raw_body, message_id, message_type="notification"):
-    """Headers Twitch would send for this exact body and secret."""
-
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-    digest = hmac.new(
-        TEST_SECRET.encode("utf-8"),
-        message_id.encode("utf-8") + timestamp.encode("utf-8") + raw_body,
-        hashlib.sha256,
-    ).hexdigest()
     return {
-        "Twitch-Eventsub-Message-Id": message_id,
-        "Twitch-Eventsub-Message-Timestamp": timestamp,
-        "Twitch-Eventsub-Message-Signature": "sha256=" + digest,
-        "Twitch-Eventsub-Message-Type": message_type,
-        "Content-Type": "application/json",
+        "metadata": {
+            "message_id": message_id,
+            "message_type": message_type,
+            "message_timestamp": "2026-01-01T00:00:00.000Z",
+        },
+        "payload": payload,
     }
+
+
+class FakeResponse:
+    """Stands in for the object requests.post returns."""
+
+    def __init__(self, status_code=202, text=""):
+        self.status_code = status_code
+        self.text = text
+
+
+class FakeSocket:
+    """A pretend WebSocket. recv hands back canned text, then says the line is idle."""
+
+    def __init__(self, name, incoming, order):
+        self.name = name
+        self.incoming = list(incoming)
+        self.order = order
+        self.closed = False
+
+    def recv(self):
+        if not self.incoming:
+            raise Server.websocket.WebSocketTimeoutException("idle")
+        self.order.append(f"recv {self.name}")
+        return self.incoming.pop(0)
+
+    def settimeout(self, seconds):
+        # The real socket uses this to cap how long recv waits.
+        return None
+
+    def close(self):
+        self.order.append(f"close {self.name}")
+        self.closed = True
 
 
 @pytest.fixture(autouse=True)
@@ -56,52 +77,216 @@ def client():
     return Server.app.test_client()
 
 
-def test_valid_signature_is_accepted(client):
-    """A webhook signed with our secret is accepted."""
+def test_welcome_message_creates_subscriptions(monkeypatch):
+    """A session_welcome creates each subscription with that session id."""
 
-    # Arrange: a redemption Twitch might send, signed the same way Twitch signs.
-    body = {
-        "subscription": {
-            "type": "channel.channel_points_custom_reward_redemption.add",
+    # Proves: the welcome message is what tells us to call Helix, and the
+    # session id from that message is the one we send.
+
+    # Arrange: Helix is a fake. A real socket must not open.
+    client = Server.EventSubClient()
+    posts = []
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        posts.append({"url": url, "headers": headers, "json": json})
+        return FakeResponse(status_code=202)
+
+    def fail_connect(*args, **kwargs):
+        raise AssertionError("welcome subscribes over HTTP and does not open another socket")
+
+    monkeypatch.setattr(Server.requests, "post", fake_post)
+    monkeypatch.setattr(Server.websocket, "create_connection", fail_connect)
+    monkeypatch.setattr(Server, "TWITCH_CLIENT_ID", "test-client-id")
+    monkeypatch.setattr(Server, "TWITCH_OAUTH_TOKEN", "user-token-for-test")
+    monkeypatch.setattr(Server, "BROADCASTER_USER_ID", "12345")
+
+    welcome = ws_message(
+        "session_welcome",
+        {
+            "session": {
+                "id": "session-abc",
+                "status": "connected",
+                "keepalive_timeout_seconds": 12,
+            },
         },
-        "event": {
-            "id": "redeem-1",
-            "user_name": "RemyFriend",
-            "user_login": "remyfriend",
-            "user_input": "",
-            "reward": {"id": "reward-1", "title": "Not A Real Reward"},
-        },
-    }
-    raw = json.dumps(body).encode("utf-8")
-    headers = signed_headers(raw, message_id="msg-valid")
-
-    # Act: post those exact bytes to the webhook.
-    response = client.post("/webhook", data=raw, headers=headers)
-
-    # Assert: Twitch got a success, so it will not retry or revoke us.
-    assert response.status_code == 200
-
-
-def test_invalid_signature_is_rejected(client):
-    """A webhook with a forged signature is refused."""
-
-    # Arrange: start from a real signature, then replace it with garbage.
-    raw = b'{"event": {}}'
-    headers = signed_headers(raw, message_id="msg-bad")
-    headers["Twitch-Eventsub-Message-Signature"] = "sha256=" + ("ab" * 32)
+        message_id="welcome-1",
+    )
 
     # Act
-    response = client.post("/webhook", data=raw, headers=headers)
+    result = client.handle_message(welcome)
 
-    # Assert: strangers cannot fire rewards, and nothing was published.
-    assert response.status_code == 403
-    assert len(Server.EVENTS) == 0
+    # Assert: one Helix call per event type, all tied to this session.
+    assert result == "welcome"
+    assert client.keepalive_timeout == 12
+    assert len(posts) == 6
+    types = [item["json"]["type"] for item in posts]
+    assert types == [
+        "channel.channel_points_custom_reward_redemption.add",
+        "channel.follow",
+        "channel.subscribe",
+        "channel.subscription.gift",
+        "channel.subscription.message",
+        "channel.cheer",
+    ]
+    for item in posts:
+        assert item["url"] == Server.EVENTSUB_URL
+        assert item["headers"]["Client-ID"] == "test-client-id"
+        assert item["headers"]["Authorization"] == "Bearer user-token-for-test"
+        assert item["json"]["transport"] == {
+            "method": "websocket",
+            "session_id": "session-abc",
+        }
+    follow = posts[1]["json"]
+    assert follow["version"] == "2"
+    assert follow["condition"] == {
+        "broadcaster_user_id": "12345",
+        "moderator_user_id": "12345",
+    }
+
+
+def test_notification_publishes_to_events(monkeypatch):
+    """A notification uses the same handler and shows up on /events."""
+
+    # Proves: a follow on the socket becomes one follow event in the feed.
+
+    # Arrange: remember the handler call, then run the real one.
+    client = Server.EventSubClient()
+    seen = []
+    real_handler = Server.handle_notification
+
+    def spy(sub_type, event):
+        seen.append((sub_type, event))
+        return real_handler(sub_type, event)
+
+    def fail_post(*args, **kwargs):
+        raise AssertionError("a notification must not create subscriptions")
+
+    def fail_connect(*args, **kwargs):
+        raise AssertionError("a notification must not open a socket")
+
+    monkeypatch.setattr(Server, "handle_notification", spy)
+    monkeypatch.setattr(Server.requests, "post", fail_post)
+    monkeypatch.setattr(Server.websocket, "create_connection", fail_connect)
+
+    notice = ws_message(
+        "notification",
+        {
+            "subscription": {"type": "channel.follow", "status": "enabled"},
+            "event": {"user_name": "RemyFriend", "user_login": "remyfriend"},
+        },
+        message_id="notice-1",
+    )
+
+    # Act
+    result = client.handle_message(notice)
+
+    # Assert
+    assert result == "notification"
+    assert seen == [(
+        "channel.follow",
+        {"user_name": "RemyFriend", "user_login": "remyfriend"},
+    )]
+    assert len(Server.EVENTS) == 1
+    assert Server.EVENTS[0]["type"] == "follow"
+    assert Server.EVENTS[0]["user"] == "RemyFriend"
+    assert Server.EVENTS[0]["login"] == "remyfriend"
+
+
+def test_duplicate_message_id_is_ignored(monkeypatch):
+    """The same message id does not publish twice."""
+
+    # Proves: a second copy of a message is dropped before the handler runs.
+
+    # Arrange: the same follow, same id, twice.
+    client = Server.EventSubClient()
+    calls = []
+    real_handler = Server.handle_notification
+
+    def spy(sub_type, event):
+        calls.append(sub_type)
+        return real_handler(sub_type, event)
+
+    monkeypatch.setattr(Server, "handle_notification", spy)
+    notice = ws_message(
+        "notification",
+        {
+            "subscription": {"type": "channel.follow"},
+            "event": {"user_name": "RemyFriend", "user_login": "remyfriend"},
+        },
+        message_id="notice-same",
+    )
+
+    # Act
+    first = client.handle_message(notice)
+    second = client.handle_message(notice)
+
+    # Assert
+    assert first == "notification"
+    assert second == "duplicate"
+    assert calls == ["channel.follow"]
+    assert len(Server.EVENTS) == 1
+
+
+def test_session_reconnect_switches_url(monkeypatch):
+    """session_reconnect connects to the new URL and closes the old socket after welcome."""
+
+    # Proves: we follow Twitch's reconnect URL, and we do not subscribe again.
+
+    # Arrange: the old socket is open. The new one has a welcome waiting.
+    order = []
+    old = FakeSocket("old", [], order)
+    welcome = json.dumps(ws_message(
+        "session_welcome",
+        {
+            "session": {
+                "id": "session-abc",
+                "keepalive_timeout_seconds": 10,
+            },
+        },
+        message_id="welcome-2",
+    ))
+    new = FakeSocket("new", [welcome], order)
+    reconnect_url = "wss://eventsub.wss.twitch.tv/reconnect?id=1"
+
+    def fake_connect(url, timeout=None):
+        order.append(("connect", url))
+        return new
+
+    def fail_subscribe(session_id):
+        raise AssertionError("a reconnect must keep the old subscriptions")
+
+    monkeypatch.setattr(Server.websocket, "create_connection", fake_connect)
+    monkeypatch.setattr(Server, "subscribe_to_events", fail_subscribe)
+
+    client = Server.EventSubClient()
+    client._ws = old
+    client.reconnect_welcome_wait = 1
+    reconnect = ws_message(
+        "session_reconnect",
+        {"session": {"reconnect_url": reconnect_url}},
+        message_id="reconnect-1",
+    )
+
+    # Act
+    result = client.handle_message(reconnect)
+
+    # Assert: connect, read the welcome, then close the old socket.
+    assert result == "reconnect"
+    assert order == [
+        ("connect", reconnect_url),
+        "recv new",
+        "close old",
+    ]
+    assert client.url == reconnect_url
+    assert client._ws is new
+    assert old.closed is True
+    assert new.closed is False
 
 
 def test_tunnel_guard_blocks_forwarded_events(client):
-    """A request that came through ngrok cannot read the local event feed."""
+    """A forwarded request cannot read the local event feed."""
 
-    # Arrange: ngrok adds this header when it forwards someone from the internet.
+    # Arrange: a proxy adds this header. This server only answers this PC.
     headers = {"X-Forwarded-For": "203.0.113.5"}
 
     # Act
@@ -253,7 +438,7 @@ def test_play_a_clip_publishes_clip_and_voice_line(monkeypatch, tmp_path):
 
 
 def test_widgets_are_local_files_inside_one_folder(client, monkeypatch, tmp_path):
-    """A widget file is served from WIDGETS_DIR. The URL cannot leave that folder, and ngrok cannot read it."""
+    """A widget file is served from WIDGETS_DIR. The URL cannot leave that folder, and a forwarded request cannot read it."""
 
     # Arrange: one widget file, and a secret that sits next to the folder, not inside it.
     widgets = tmp_path / "widgets"
@@ -277,7 +462,7 @@ def test_widgets_are_local_files_inside_one_folder(client, monkeypatch, tmp_path
     assert escaped.status_code == 404
     assert b"top-secret" not in escaped.data
 
-    # Act: the same file, forwarded by ngrok.
+    # Act: the same file, with a forwarding header.
     forwarded = client.get(
         "/widgets/orc/index.html",
         headers={"X-Forwarded-For": "203.0.113.5"},
@@ -357,13 +542,13 @@ def test_counsel_cooldown_returns_canned(client, monkeypatch):
 
 
 def test_counsel_is_blocked_through_the_tunnel(client, monkeypatch):
-    """ngrok cannot spend the Gemini quota. A forwarded /counsel is refused."""
+    """A forwarded /counsel is refused, so it cannot spend the Gemini quota."""
 
     # Arrange: a key is set, and any real call would fail this test.
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
 
     def fake_post(*args, **kwargs):
-        raise AssertionError("Gemini should not be called through the tunnel")
+        raise AssertionError("Gemini should not be called for a forwarded request")
 
     monkeypatch.setattr(Server.requests, "post", fake_post)
 

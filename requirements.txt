@@ -1,6 +1,7 @@
 flask
 requests
 python-dotenv
+websocket-client
 obsws-python
 edge-tts
 Pillow

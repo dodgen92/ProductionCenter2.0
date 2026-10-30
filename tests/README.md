@@ -1,6 +1,6 @@
 # Tests, the short version
 
-These tests check Production Center without Twitch, OBS, ngrok, or the internet. The files in `tests/` are examples.
+These tests check Production Center without Twitch, OBS, or the internet. The files in `tests/` are examples you can copy when you want to check a new behavior.
 
 ## What a unit test is
 
@@ -32,6 +32,8 @@ After that, any `requests.get` inside `Server.py` hits `fake_get` instead of the
 
 `test_play_a_clip_publishes_clip_and_voice_line` does the same kind of swap for `clips.get_app_token` and `clips.get_broadcaster_clips`, and points `VOICE_LINES_DIR` at a temp folder.
 
+`test_welcome_message_creates_subscriptions` swaps `requests.post` the same way, so a welcome message can create subscriptions without calling Helix. It also swaps `websocket.create_connection` so the test fails if a real socket opens.
+
 ## How to run
 
 From the project folder:
@@ -46,7 +48,7 @@ pytest -v
 Run one test by name:
 
 ```bash
-pytest -v tests/test_examples.py::test_valid_signature_is_accepted
+pytest -v tests/test_examples.py::test_welcome_message_creates_subscriptions
 ```
 
 ## How to read the output
@@ -54,10 +56,10 @@ pytest -v tests/test_examples.py::test_valid_signature_is_accepted
 A passing run looks like this:
 
 ```text
-tests/test_examples.py::test_valid_signature_is_accepted PASSED
-tests/test_examples.py::test_invalid_signature_is_rejected PASSED
+tests/test_examples.py::test_welcome_message_creates_subscriptions PASSED
+tests/test_examples.py::test_notification_publishes_to_events PASSED
 ...
-======= 11 passed in 0.20s =======
+======= 13 passed in 0.20s =======
 ```
 
 `PASSED` means every `assert` in that test was true.
@@ -75,75 +77,76 @@ The test wanted status 200 and the app returned 403. Fix the app or fix the test
 
 ## The files pytest uses for you
 
-`tests/conftest.py` runs before the tests. You never call it. It adds the project folder to the import path and sets a fake `EVENTSUB_SECRET` so importing `Server.py` does not need your real `.env`. The secret in that file is not a Twitch secret. It only has to match `TEST_SECRET` in the test file.
+`tests/conftest.py` runs before the tests. You never call it. It adds the project folder to the import path and sets fake OBS and Twitch ids so importing `Server.py` does not need your real `.env`. Those values are not your tokens.
 
 `clean_server_state` in `tests/test_examples.py` runs before every test (`autouse=True`). It empties the event feed, forgets message ids, and points the credits file at a temp folder so tests do not write `stream_credits.json` in the project.
 
-`client` is Flask's test client. `client.post` and `client.get` call the routes in-process. `127.0.0.1` is the remote address, so the tunnel guard treats them as local unless you add a forwarding header.
+`client` is Flask's test client. `client.post` and `client.get` call the routes in-process. `127.0.0.1` is the remote address, so the localhost check treats them as local unless you add a forwarding header.
 
 ## One test, line by line
 
-This is `test_valid_signature_is_accepted`. It proves a webhook signed with our secret is accepted.
+This is `test_welcome_message_creates_subscriptions`. It proves a welcome message creates the EventSub subscriptions and sends the session id from that message.
 
 ```python
-def test_valid_signature_is_accepted(client):
-    """A webhook signed with our secret is accepted."""
+def test_welcome_message_creates_subscriptions(monkeypatch):
+    """A session_welcome creates each subscription with that session id."""
 
-    # Arrange: a redemption Twitch might send, signed the same way Twitch signs.
-    body = {
-        "subscription": {
-            "type": "channel.channel_points_custom_reward_redemption.add",
-        },
-        "event": {
-            "id": "redeem-1",
-            "user_name": "RemyFriend",
-            "user_login": "remyfriend",
-            "user_input": "",
-            "reward": {"id": "reward-1", "title": "Not A Real Reward"},
-        },
-    }
-    raw = json.dumps(body).encode("utf-8")
-    headers = signed_headers(raw, message_id="msg-valid")
+    # Proves: the welcome message is what tells us to call Helix, and the
+    # session id from that message is the one we send.
 
-    # Act: post those exact bytes to the webhook.
-    response = client.post("/webhook", data=raw, headers=headers)
+    # Arrange: Helix is a fake. A real socket must not open.
+    client = Server.EventSubClient()
+    posts = []
 
-    # Assert: Twitch got a success, so it will not retry or revoke us.
-    assert response.status_code == 200
+    def fake_post(url, headers=None, json=None, timeout=None):
+        posts.append({"url": url, "headers": headers, "json": json})
+        return FakeResponse(status_code=202)
+
+    def fail_connect(*args, **kwargs):
+        raise AssertionError("welcome subscribes over HTTP and does not open another socket")
+
+    monkeypatch.setattr(Server.requests, "post", fake_post)
+    monkeypatch.setattr(Server.websocket, "create_connection", fail_connect)
+    monkeypatch.setattr(Server, "TWITCH_CLIENT_ID", "test-client-id")
+    monkeypatch.setattr(Server, "TWITCH_OAUTH_TOKEN", "user-token-for-test")
+    monkeypatch.setattr(Server, "BROADCASTER_USER_ID", "12345")
 ```
 
-`def test_valid_signature_is_accepted(client):`
-Pytest runs any function whose name starts with `test_`. `client` is the fixture above. Pytest sees the argument name, calls the `client` fixture, and passes the result in. You do not call the fixture yourself.
+`def test_welcome_message_creates_subscriptions(monkeypatch):`
+Pytest runs any function whose name starts with `test_`. `monkeypatch` is a fixture pytest gives you. You do not call it yourself. It lets this test replace functions, then puts the originals back when the test ends.
 
-`"""A webhook signed with our secret is accepted."""`
-The docstring is for humans. It says what a pass is supposed to prove. Pytest prints it when a test fails if you use certain flags; the comments below are the main guide.
+`"""A session_welcome creates each subscription with that session id."""`
+The docstring is for humans. It says what a pass is supposed to prove. The `# Proves:` comment under it says the same thing in the test body.
 
-`# Arrange`
-The three comments are the shape to copy: Arrange (set the scene), Act (do the one thing), Assert (check the outcome).
+`client = Server.EventSubClient()`
+This builds the WebSocket helper without starting its background thread and without opening a socket. The test calls `handle_message` directly, the same function the real socket calls when a message arrives.
 
-`body = { ... }`
-This is a Python dict standing in for Twitch's JSON. The reward title is `Not A Real Reward` so the test does not start the camera filter, the Pokémon catch, or the archiver.
+`posts = []` and `fake_post`
+`fake_post` has the same arguments `requests.post` uses. It saves each call in `posts` and returns a tiny object with status 202, which is what Twitch sends when a WebSocket subscription is accepted. Nothing leaves the computer.
 
-`raw = json.dumps(body).encode("utf-8")`
-Twitch signs the raw bytes of the body, not a Python dict. `json.dumps` makes a string. `.encode("utf-8")` makes bytes. The test sends these same bytes. If you built a new JSON later, the signature would not match.
+`fail_connect`
+If the welcome path tried to open a second socket, this stand-in would crash the test. That is how we know the subscription uses HTTP, not another WebSocket.
 
-`headers = signed_headers(raw, message_id="msg-valid")`
-`signed_headers` is the helper at the top of the file. It fills in the four Twitch headers: message id, a fresh timestamp, the HMAC signature, and the message type `notification`. The signature is `sha256=` plus HMAC-SHA256 of `message id + timestamp + raw body`, using `TEST_SECRET`. That is the same formula as `signature_matches` in `Server.py`. `message_id="msg-valid"` is just a label so this message is not confused with another test.
+`monkeypatch.setattr(...)`
+These four lines install the fakes and the fake Twitch ids for this test only. `TWITCH_OAUTH_TOKEN` here is the word `user-token-for-test`. It is not a real token.
 
-`response = client.post("/webhook", data=raw, headers=headers)`
-This is the Act. It calls `webhook()` as if Twitch posted to the server. `data=raw` sends the bytes we signed. No port is opened.
+The rest of the test (the Act and the Assert) builds a welcome message with `session_id` `session-abc`, calls `client.handle_message(welcome)`, and checks six things:
 
-`assert response.status_code == 200`
-This is the Assert. `assert` means "stop the test if this is false." Status 200 means the server accepted the signed message. If the secret, the byte order, or the route is wrong, this line fails and pytest prints both numbers.
+- the call returned `"welcome"`
+- the keepalive number from the message was stored (`12`)
+- Helix was called once for each event type
+- every call used `transport.method` `websocket` and `session_id` `session-abc`
+- the follow subscription is version `2` and sets `moderator_user_id` to the broadcaster id
 
-The next test, `test_invalid_signature_is_rejected`, copies this setup and then overwrites the signature with junk. Same body, bad signature, status 403, and the event feed stays empty. Read that one second. The contrast is the whole point of the signature check.
+Read `test_notification_publishes_to_events` next. It feeds a follow notification and checks that the same handler runs and that `/events` got one follow. `test_duplicate_message_id_is_ignored` sends that follow twice with the same id and expects a single event. `test_session_reconnect_switches_url` uses `FakeSocket` instead of a real WebSocket and checks that the client connects to the new URL, reads the welcome, and only then closes the old socket.
 
 ## How to write a new test
 
-1. Copy the test above into `tests/test_examples.py` and rename it. Names read like a sentence: `test_stale_timestamp_is_rejected`.
-2. Change the Arrange so the scene matches the idea. Use `monkeypatch` when the idea says to mock.
-3. Keep a single Act.
-4. Assert the expected status, JSON, or function call. One behavior per test is enough.
-5. Run `pytest -v` and read the bottom line.
+1. Copy a test in `tests/test_examples.py` and rename it. Names read like a sentence: `test_duplicate_message_id_is_ignored`.
+2. Put a one-line comment that says what a pass proves.
+3. Change the Arrange so the scene matches the idea. Use `monkeypatch` when the idea says to mock.
+4. Keep a single Act.
+5. Assert the expected status, JSON, or function call. One behavior per test is enough.
+6. Run `pytest -v` and read the bottom line.
 
 Do not point a test at real Twitch or a live OBS. If a test needs a file, use pytest's `tmp_path` (a temp folder that goes away after the test) the way the credits and clip tests do.

@@ -13,7 +13,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # These values are fake. They exist so the tests are deterministic.
-os.environ["EVENTSUB_SECRET"] = "unit-test-eventsub-secret"
 os.environ.setdefault("OBS_PORT", "4455")
 os.environ.setdefault("OBS_HOST", "127.0.0.1")
 os.environ.setdefault("OBS_PASSWORD", "test-only")

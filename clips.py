@@ -6,9 +6,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# SECRET used to be both the EventSub webhook secret and this app's client
-# secret. Prefer TWITCH_CLIENT_SECRET. Fall back to SECRET so an old .env
-# keeps working until the two values are split.
+# Prefer TWITCH_CLIENT_SECRET. Fall back to SECRET so an older .env
+# that stored the app client secret under SECRET keeps working.
 GAME_ID = "18122"
 
 
