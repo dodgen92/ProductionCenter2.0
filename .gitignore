@@ -38,3 +38,6 @@ widgets/fact-gnome/voice/
 
 # Local test notes. Do not commit.
 tests.txt
+
+
+voice_env/
