@@ -67,6 +67,8 @@ def clean_server_state(monkeypatch, tmp_path):
     Server._counsel_last_ask.clear()
     monkeypatch.setattr(Server, "CREDITS_FILE", tmp_path / "stream_credits.json")
     monkeypatch.setattr(gemini_usage, "USAGE_FILE", tmp_path / "gemini_usage.json")
+    # A real clips_cache on this PC must not change Play a Clip tests.
+    monkeypatch.setattr(Server, "CLIPS_DIR", tmp_path / "clips_cache")
 
 
 @pytest.fixture

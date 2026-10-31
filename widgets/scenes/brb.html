@@ -1,0 +1,25 @@
+<!doctype html><html><head><meta charset="utf-8"><title>BRB</title><link rel="stylesheet" href="scenes.css"><script src="scenes-config.js"></script><script src="brb/shorts/shorts.js"></script></head><body class="brb">
+<div id="main" class="panel"><i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i><i class="gem"></i>
+<h1 id="title">BE RIGHT BACK</h1><div class="line" id="tag">Enjoy these classic Remyfriend moments</div></div>
+<div id="player" class="panel"><i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i><i class="gem"></i><video id="v" playsinline></video></div>
+<div id="cap">From the channel • YouTube @moderemyd</div>
+<script src="scenes.js"></script><script>
+var side=Q.get('side')==='right'?'right':'left';$('player').classList.add(side);$('cap').classList.add(side);
+if(Q.get('cap')!=null)setText('cap',Q.get('cap'));if(Q.get('cap')==='')$('cap').style.display='none';
+if(Q.get('tagline')!=null)setText('tag',Q.get('tagline'));
+var P=$('player');P.classList.add('hide');setTimeout(function(){P.classList.remove('hide');startShorts()},1000*(Q.has('shortdelay')?+Q.get('shortdelay'):10));
+var v=$('v'),vol=Q.has('vol')?+Q.get('vol'):.6;v.volume=Math.max(0,Math.min(1,vol));v.muted=Q.get('mute')==='1';
+var dir=Q.get('dir')||'brb/shorts/',list=[],bag=[],last=null,fails=0;
+function shuffle(){bag=list.slice();for(var i=bag.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),t=bag[i];bag[i]=bag[j];bag[j]=t}if(bag.length>1&&bag[0]===last)bag.push(bag.shift())}
+function next(){if(!list.length)return ph();if(fails>=list.length)return ph();if(!bag.length)shuffle();last=bag.shift();window.BRB_NOW=last;(window.BRB_LOG=window.BRB_LOG||[]).push(last);
+ v.src=dir+encodeURI(last);v.play().catch(function(){v.muted=true;v.play().catch(function(){})})}
+v.addEventListener('ended',function(){fails=0;AMB.duck(false);next()});v.addEventListener('playing',function(){fails=0;AMB.duck(!v.muted)});v.addEventListener('pause',function(){AMB.duck(false)});
+v.addEventListener('error',function(){fails++;list=list.filter(function(x){return x!==last});next()});
+function ph(){v.style.display='none';if($('ph'))return;var p=$('player');
+ if(TEST){var c=document.createElement('canvas');c.width=360;c.height=640;p.appendChild(c);var g=c.getContext('2d'),t=0;(function d(){t++;var h=(t*.5)%360;g.fillStyle='hsl('+h+',35%,14%)';g.fillRect(0,0,360,640);g.fillStyle='#ffd100';g.font='600 34px AN,sans-serif';g.textAlign='center';g.fillText('SHORT PREVIEW',180,300);g.fillStyle='#fff';g.font='600 22px AN,sans-serif';g.fillText('drop .mp4s in brb/shorts',180,340);g.fillStyle='#b58a35';g.fillRect(20,600,320*((t%300)/300),8);requestAnimationFrame(d)})();return}
+ p.insertAdjacentHTML('beforeend','<div class="ph" id="ph"><div style="font-size:60px">⚔</div>Shorts coming soon</div>')}
+function probe(){var found=[],n=0,N=50;for(var i=1;i<=N;i++)(function(i){var t=document.createElement('video');t.preload='metadata';t.muted=true;
+ t.onloadedmetadata=function(){found.push(i+'.mp4');done()};t.onerror=done;t.src=dir+i+'.mp4'})(i);
+ function done(){if(++n===N){list=found;next()}}}
+function startShorts(){if(Array.isArray(window.BRB_SHORTS)&&window.BRB_SHORTS.length){list=window.BRB_SHORTS.map(String);next()}else probe()}
+</script></body></html>

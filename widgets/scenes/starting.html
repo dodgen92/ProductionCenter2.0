@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Starting Soon</title><link rel="stylesheet" href="scenes.css"><script src="scenes-config.js"></script></head><body>
+<div id="main" class="panel"><i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i><i class="gem"></i>
+<h1 id="title">STARTING SOON</h1><div class="sub" id="cd"></div><div class="line" id="tip"></div></div>
+<script src="scenes.js"></script><script>
+var end=null,m=Q.get('min'),at=Q.get('at');if(TEST&&!m&&!at)m='0.1';
+if(m)end=Date.now()+parseFloat(m)*60000;
+else if(at){var t=at.split(':'),d=new Date();d.setHours(+t[0],+t[1]||0,0,0);if(d<Date.now())d.setDate(d.getDate()+1);end=+d}
+function tick(){if(end==null){$('cd').textContent='';return}var s=Math.round((end-Date.now())/1000);
+ $('cd').textContent=s<=0?'Any second now...':Math.floor(s/60)+':'+String(s%60).padStart(2,'0')}
+tick();setInterval(tick,500);rotate('tip',window.SCENE_TIPS,8000);
+</script></body></html>

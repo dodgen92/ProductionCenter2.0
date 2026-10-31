@@ -1,0 +1,13 @@
+STARTING SOON: Add Browser Source, untick Local file, 1920x1080, tick 'Control audio via OBS' (tavern ambience).
+  URL: file:///C:/Users/tyler/Desktop/Stream-Widgets/scenes/starting.html?min=5
+  Test: add &test=1. Or use ?at=19:30 to count to a clock time.
+
+BE RIGHT BACK: Add Browser Source, untick Local file, 1920x1080, tick 'Control audio via OBS'.
+  URL: file:///C:/Users/tyler/Desktop/Stream-Widgets/scenes/brb.html?vol=0.6&avol=0.35
+  Drop vertical .mp4 shorts into scenes\brb\shorts and list them in shorts.js (Notepad), then Refresh cache.
+
+END SCREEN: Add Browser Source, untick Local file, 1920x1080, tick 'Control audio via OBS'.
+  URL: file:///C:/Users/tyler/Desktop/Stream-Widgets/scenes/end.html?raid=NAME
+  Remove &raid=NAME if not raiding. Add &test=1 to preview.
+
+TAVERN: art is in scenes\bg. Add &ambience=0 to any URL to silence the tavern sounds.

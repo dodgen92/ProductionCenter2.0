@@ -38,6 +38,8 @@ ARCHIVE_SCRIPT = BASE_DIR / "archive.py"
 CREDITS_FILE = BASE_DIR / "stream_credits.json"
 BANNED_WORDS_FILE = BASE_DIR / "banned_words.txt"
 VOICE_LINES_DIR = BASE_DIR / "voice_lines"
+# Downloaded mp4 clips and index.json. Gitignored. Rebuilt on startup.
+CLIPS_DIR = BASE_DIR / "clips_cache"
 CREDITS_PAGE = BASE_DIR / "credits.html"
 
 # Twitch's real EventSub WebSocket. EVENTSUB_WS_URL overrides this for a local mock.
@@ -415,7 +417,10 @@ def pick_voice_line(character="orc"):
 
 
 def fetch_random_clip():
-    """One random clip from the recent top WoW list, using the app token in clips.py."""
+    """One random clip from the recent top WoW list, using the app token in clips.py.
+
+    This is the fallback when clips_cache has nothing to play yet.
+    """
 
     token = clips.get_app_token()
     found = clips.get_top_wow_clips(token)
@@ -424,40 +429,59 @@ def fetch_random_clip():
     return random.choice(found)
 
 
-def play_clip_for(user, login, reward=""):
-    """Fetch a clip and a voice line, then publish a clip event either way."""
+def clip_event_fields(clip):
+    """The clip keys on a /events message.
 
-    clip = None
-    try:
-        clip = fetch_random_clip()
-    except Exception as exc:
-        # Do not print the exception text. A token failure can include the URL.
-        print(f"[Server] WARNING: could not fetch a clip ({type(exc).__name__}).")
-    if not clip:
-        print("[Server] WARNING: no clip available. Publishing empty clip fields.")
-        clip = {}
+    A library row uses file, clip_id, url, and creator.
+    A live Helix clip uses id, url, and creator_name. Both shapes work here.
+    """
+
+    clip = clip or {}
+    filename = str(clip.get("file") or "")
+    video_url = ""
+    if filename:
+        video_url = "/clips/" + quote(filename)
+    duration = clip.get("duration")
+    if duration is None:
+        duration = 0
+    return {
+        "clip_id": clip.get("clip_id") or clip.get("id") or "",
+        "clip_url": clip.get("url") or clip.get("clip_url") or "",
+        "embed_url": clip.get("embed_url") or "",
+        "title": clip.get("title") or "",
+        "creator": clip.get("creator") or clip.get("creator_name") or "",
+        "broadcaster_name": clip.get("broadcaster_name") or "",
+        "duration": duration,
+        "thumbnail_url": clip.get("thumbnail_url") or "",
+        "video_url": video_url,
+    }
+
+
+def play_clip_for(user, login, reward=""):
+    """Publish a clip event. Prefer a downloaded mp4. Otherwise ask Helix."""
+
+    clip = pick_local_clip()
+    if clip is None:
+        try:
+            clip = fetch_random_clip()
+        except Exception as exc:
+            # Do not print the exception text. A token failure can include the URL.
+            print(f"[Server] WARNING: could not fetch a clip ({type(exc).__name__}).")
+        if not clip:
+            print("[Server] WARNING: no clip available. Publishing empty clip fields.")
+            clip = {}
 
     voice_line = pick_voice_line("orc")
     if not voice_line:
         print("[Server] WARNING: no voice lines in voice_lines/orc/. Publishing an empty voice_line.")
 
-    duration = clip.get("duration")
-    if duration is None:
-        duration = 0
-
     publish(
         "clip",
         user=user or "",
         login=login or "",
-        clip_id=clip.get("id") or "",
-        clip_url=clip.get("url") or "",
-        embed_url=clip.get("embed_url") or "",
-        title=clip.get("title") or "",
-        creator=clip.get("creator_name") or "",
-        duration=duration,
-        thumbnail_url=clip.get("thumbnail_url") or "",
         voice_line=voice_line or "",
         reward=reward or "",
+        **clip_event_fields(clip),
     )
 
 
@@ -493,12 +517,119 @@ def serve_voice_line(name, filename):
     return send_file(path, mimetype=mimetype)
 
 
+def _clip_file_path(filename):
+    """An mp4 inside clips_cache, or None if the name is not safe."""
+
+    filename = str(filename or "")
+    if not filename or filename in {".", ".."}:
+        return None
+    if "/" in filename or "\\" in filename:
+        return None
+    # A folder in the name, or a leading slash, is not a single file.
+    if Path(filename).name != filename:
+        return None
+    if Path(filename).suffix.lower() != ".mp4":
+        return None
+    root = CLIPS_DIR.resolve()
+    path = (root / filename).resolve()
+    if not path.is_relative_to(root):
+        return None
+    if not path.is_file():
+        return None
+    return path
+
+
+def read_clip_index():
+    """Index rows whose mp4 is actually on disk. Empty while a download is still running."""
+
+    path = CLIPS_DIR / "index.json"
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        print("[Server] WARNING: clip index is not valid JSON.")
+        return []
+    if not isinstance(data, list):
+        return []
+    ready = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        if _clip_file_path(item.get("file") or "") is None:
+            continue
+        ready.append(item)
+    return ready
+
+
+def pick_local_clip():
+    """One random downloaded clip, or None when the library is empty."""
+
+    entries = read_clip_index()
+    if not entries:
+        return None
+    return random.choice(entries)
+
+
+def clear_clip_cache():
+    """Delete last startup's clips. Leave .gitkeep so the folder stays in git."""
+
+    CLIPS_DIR.mkdir(parents=True, exist_ok=True)
+    for path in CLIPS_DIR.iterdir():
+        if not path.is_file() or path.name == ".gitkeep":
+            continue
+        try:
+            path.unlink()
+        except OSError as exc:
+            # OBS may still have the mp4 open. Skip it and keep going.
+            print(f"[Server] WARNING: could not delete old clip {path.name} ({type(exc).__name__}).")
+
+
+def refresh_clip_library():
+    """Rebuild clips_cache. Meant to run in a background thread so startup is not blocked.
+
+    Until this finishes, Play a Clip uses the Helix embed fallback.
+    """
+
+    print("[Server] Clip library: clearing old files.")
+    try:
+        clear_clip_cache()
+        token = clips.get_app_token()
+        entries = clips.build_clip_library(token, CLIPS_DIR)
+    except Exception as exc:
+        # Do not print the exception text. A token failure can include the URL.
+        print(f"[Server] WARNING: clip library failed ({type(exc).__name__}).")
+        entries = []
+    print(f"[Server] downloaded {len(entries)} clips")
+
+
+@app.route("/clips/<path:filename>")
+def serve_clip(filename):
+    """One local mp4. conditional=True answers Range with 206 so the video can seek."""
+
+    path = _clip_file_path(filename)
+    if path is None:
+        abort(404)
+    return send_from_directory(
+        CLIPS_DIR,
+        path.name,
+        mimetype="video/mp4",
+        conditional=True,
+    )
+
+
 def widgets_directory():
-    """WIDGETS_DIR from .env. A relative path is inside this project, not a fixed drive."""
+    """Folder served at /widgets/.
+
+    Blank WIDGETS_DIR means the widgets/ folder in this repo.
+    A relative WIDGETS_DIR is inside this project, not a fixed drive.
+    """
 
     raw = (os.getenv("WIDGETS_DIR") or "").strip()
     if not raw:
-        return None
+        return BASE_DIR / "widgets"
     folder = Path(raw)
     if not folder.is_absolute():
         folder = BASE_DIR / folder
@@ -510,11 +641,8 @@ def widgets(p):
     """Serve one widget file. Twitch clip embeds will not play from file://."""
 
     folder = widgets_directory()
-    if folder is None:
-        print("[Server] WIDGETS_DIR is not set. Add it to .env to serve /widgets/.")
-        abort(404)
     if not folder.is_dir():
-        print(f"[Server] WIDGETS_DIR is missing or not a folder: {folder}")
+        print(f"[Server] Widget folder is missing or not a folder: {folder}")
         abort(404)
     # send_from_directory rejects .. so a URL cannot escape this folder.
     response = send_from_directory(folder, p)
@@ -1504,6 +1632,9 @@ class EventSubClient:
 
 if __name__ == "__main__":
     print("Starting Production Center server...")
+
+    # Downloads take a while. Do not wait for them before opening port 5000.
+    Thread(target=refresh_clip_library, daemon=True).start()
 
     eventsub_client = EventSubClient()
     eventsub_client.start()

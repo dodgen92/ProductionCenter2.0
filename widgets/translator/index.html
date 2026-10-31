@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Night Elf Translator</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<div id="stage" class="left">
+ <div id="bubble">
+  <div class="hdr"><span id="hdr">Translation</span><span id="who"></span></div>
+  <div id="orig"><span class="pin" id="pinFrom"></span><span id="origText"></span></div>
+  <div id="arrow">&#10022;</div>
+  <div id="trans"><span class="pin" id="pinTo"></span><span id="transText"></span></div>
+  <div id="quip"></div>
+ </div>
+ <div id="elf">
+  <div id="sparkle"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div id="idle"><div id="talk"><div id="flip">
+   <img id="art" src="art/elf.png" alt="" draggable="false" onerror="this.hidden=true;document.getElementById('ph').hidden=false">
+   <div id="ph" hidden></div>
+   <div id="glow"></div>
+   <div id="pins"></div>
+   <div id="motes"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  </div></div></div>
+ </div>
+</div>
+<script src="translator.js"></script>
+</body></html>

@@ -1,0 +1,5 @@
+1. OBS > + Browser Source > UNTICK "Local file".
+2. URL: file:///C:/Users/tyler/Desktop/Stream-Widgets/fact-gnome/index.html?channel=remyfriend&reward=Gnome%20Fact   (add &test=1 to preview)
+3. Width 1920, Height 1080, keep default CSS, leave the source full-screen; tick "Control audio via OBS" so her voice shows in the mixer.
+4. Live voice needs the Production Center running with the /tts route (pip install edge-tts). Without it she still talks, in a Windows voice.
+5. Change voice: add &voice=en-GB-MaisieNeural (or JennyNeural / AriaNeural). In a URL, + is %2B and % is %25, e.g. &pitch=%2B35Hz&rate=%2B15%25

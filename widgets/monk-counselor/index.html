@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Pandaren Counselor</title><link rel="icon" href="data:,"><link rel="stylesheet" href="style.css"></head>
+<body>
+<div id="stage" class="left">
+ <div id="bubble">
+  <div class="hdr"><span id="hdr">Ask the Monk</span><span id="who"></span></div>
+  <div id="q"></div>
+  <div id="dots"><i></i><i></i><i></i></div>
+  <div id="a"></div>
+ </div>
+ <div id="monk">
+  <div id="petals"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div id="idle"><div id="ponder"><div id="talk"><div id="flip">
+   <img id="art" src="art/monk.png" alt="" draggable="false" onerror="this.hidden=true;document.getElementById('ph').hidden=false">
+   <div id="ph" hidden></div>
+   <div id="ink"></div>
+   <div id="wisps"><i></i><i></i><i></i><i></i><i></i></div>
+   <div id="cup"><div id="steam"><i></i><i></i><i></i></div>
+    <svg viewBox="0 0 60 44"><ellipse cx="30" cy="40" rx="26" ry="4" fill="#5a3b14"/><path d="M8 10h44q-2 26-22 28Q10 36 8 10z" fill="#e9dcc0" stroke="#7a5420" stroke-width="2"/><path d="M10 16h40" stroke="#2f7a5a" stroke-width="3"/><ellipse cx="30" cy="10" rx="22" ry="4" fill="#9b7a2c" stroke="#7a5420" stroke-width="2"/><path d="M52 14q8 2 4 10q-2 4-6 4" fill="none" stroke="#7a5420" stroke-width="3"/></svg></div>
+  </div></div></div></div>
+ </div>
+</div>
+<script src="monk.js"></script>
+</body></html>

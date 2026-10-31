@@ -1,0 +1,5 @@
+1) Production Center must serve this folder: OBS Browser source (Local file UNticked) -> http://localhost:5000/widgets/orc-clip/index.html  (1920x1080). file:// will NOT play clips.
+2) Preview: add ?test=1 to the URL. Tick "Control audio via OBS" if you want the voice/clip on their own mixer channel.
+3) Create the "Play a Clip" channel point reward; put your recorded orc mp3s in the Production Center's voice_lines/orc/ folder.
+
+CLIP MUTED? Right-click the browser source > Interact > click the clip's speaker once (once per OBS session). Header shows "CHANNEL: Title" (broadcaster_name). Downloaded clips (video_url) play with sound and need no click; ?cvol=0.8 sets clip volume. The click tip above only applies to the Twitch iframe fallback.
