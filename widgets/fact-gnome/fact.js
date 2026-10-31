@@ -65,11 +65,23 @@ function speakBrowser(fact){
 
 // ---- live TTS: fetch mp3 from the server, lip-sync to real loudness, type bubble over audio duration ----
 const talkEl=document.getElementById('talk');let actx=null;
+async function fetchAudio(src,ms){
+  const ac=new AbortController(),to=setTimeout(()=>ac.abort(),ms);
+  try{const r=await fetch(src,{signal:ac.signal,cache:'no-store'});
+    if(!r.ok)throw new Error('audio http '+r.status);const b=await r.blob();if(!b.size)throw new Error('empty audio');return b;}finally{clearTimeout(to);}
+}
 async function speakLive(fact){
   const q=new URLSearchParams({text:fact,voice:LIVE_VOICE,rate:LIVE_RATE,pitch:LIVE_PITCH});
-  const ac=new AbortController(),to=setTimeout(()=>ac.abort(),4000);
-  let blob;try{const r=await fetch(SERVER+'/tts?'+q,{signal:ac.signal,cache:'no-store'});
-    if(!r.ok)throw new Error('tts http '+r.status);blob=await r.blob();if(!blob.size)throw new Error('empty audio');}finally{clearTimeout(to);}
+  return playBlob(fact,await fetchAudio(SERVER+'/tts?'+q,4000));
+}
+// pre-recorded Kokoro lines: voice/voices.js maps exact fact text -> wav path (relative to this folder). ?prerec=0 skips.
+const PREREC=!MUTE&&g('prerec')!=='0';
+function prerecPath(fact){const m=window.GNOME_VOICES;return m&&typeof m==='object'&&typeof m[fact]==='string'&&m[fact]?m[fact]:'';}
+async function speakPrerec(fact){
+  const p=prerecPath(fact);if(!p)throw new Error('no prerec line');
+  return playBlob(fact,await fetchAudio(new URL(p,location.href).href,6000));
+}
+async function playBlob(fact,blob){
   const url=URL.createObjectURL(blob),a=new Audio(url);a.volume=VOL;
   await new Promise((ok,bad)=>{a.onloadedmetadata=ok;a.onerror=()=>bad(new Error('bad audio'));setTimeout(()=>bad(new Error('metadata timeout')),4000);});
   let an=null,buf=null;
@@ -91,6 +103,7 @@ async function speakLive(fact){
   });
 }
 async function speakFact(fact){
+  if(PREREC&&prerecPath(fact)){try{await speakPrerec(fact);window.__gnomeMode='prerec';return;}catch(e){console.warn('pre-recorded line failed, falling back',e&&e.message);}}
   if(LIVE){try{await speakLive(fact);window.__gnomeMode='live';return;}catch(e){console.warn('live TTS failed, falling back',e&&e.message);}}
   window.__gnomeMode='browser';return speakBrowser(fact);
 }
