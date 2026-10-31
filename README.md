@@ -1,6 +1,6 @@
 # 🎬 Production Center
 
-**A live-stream control room that lets Twitch chat run the show.** Viewers spend channel points, and Production Center reacts in real time: it flips camera filters, rips animated Pokémon cards onto the screen, starts or stops automatic clipping that posts highlights straight to Discord, and can roll a random channel clip with an orc voice line.
+**A live-stream control room that lets Twitch chat run the show.** Viewers spend channel points, and Production Center reacts in real time: it flips camera filters, rips animated Pokémon cards onto the screen, starts or stops automatic clipping that posts highlights straight to Discord, and can roll a random World of Warcraft clip with an orc voice line.
 
 Widgets on this PC (the Fact Gnome, the translator, the orc, end credits) read one local feed from this server. The server connects out to Twitch EventSub over a WebSocket. Twitch does not call back into this PC.
 
@@ -16,7 +16,7 @@ Widgets on this PC (the Fact Gnome, the translator, the orc, end credits) read o
 | **Add Camera Filter** | Applies a random camera filter (via AutoHotkey hotkeys), then clears it after 3 minutes. |
 | **Rip a Vintage Pokémon Card** | Pulls a random Gen 1 card the viewer hasn't caught yet, slides it across the screen with an eased OBS animation, and shows their progress toward all 151. Each viewer's collection is saved. |
 | **Start** / **Stop** | Starts or stops an auto-clipping loop that creates Twitch clips on a timer and posts each one to a Discord channel. |
-| **Play a Clip** | Picks a random clip from your channel and a random file from `voice_lines/orc/`, then publishes a `clip` event for the orc widget. The title match ignores case. Rename it with `CLIP_REWARD_TITLE` if you want. |
+| **Play a Clip** | Picks a random clip from the recent top World of Warcraft clips and a random file from `voice_lines/orc/`, then publishes a `clip` event for the orc widget. The title match ignores case. Rename it with `CLIP_REWARD_TITLE` if you want. |
 | **Translate to English** / **Translate from English** | Not handled inside the reward `if` chain. Every redemption is published on `/events` (including the viewer's text). The translator widget sees those and calls `/translate` and `/tts`. Create both rewards with "Require viewer to enter text" turned on. |
 
 Follows, subs, resubs, gifted subs, and cheers are published on the same feed and collected for the end-credits roll.

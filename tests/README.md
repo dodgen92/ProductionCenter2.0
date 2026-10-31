@@ -30,7 +30,7 @@ monkeypatch.setattr(Server.requests, "get", fake_get)
 
 After that, any `requests.get` inside `Server.py` hits `fake_get` instead of the internet. The asserts then check both the JSON and that we called Google's host once with the text `hola chat`.
 
-`test_play_a_clip_publishes_clip_and_voice_line` does the same kind of swap for `clips.get_app_token` and `clips.get_broadcaster_clips`, and points `VOICE_LINES_DIR` at a temp folder.
+`test_play_a_clip_publishes_clip_and_voice_line` does the same kind of swap for `clips.get_app_token` and `clips.get_top_wow_clips`, and points `VOICE_LINES_DIR` at a temp folder. `test_play_a_clip_with_no_wow_clips_publishes_empty_fields` uses an empty list from that stand-in and checks that the clip fields stay blank.
 
 `test_welcome_message_creates_subscriptions` swaps `requests.post` the same way, so a welcome message can create subscriptions without calling Helix. It also swaps `websocket.create_connection` so the test fails if a real socket opens.
 
@@ -59,7 +59,7 @@ A passing run looks like this:
 tests/test_examples.py::test_welcome_message_creates_subscriptions PASSED
 tests/test_examples.py::test_notification_publishes_to_events PASSED
 ...
-======= 13 passed in 0.20s =======
+======= 14 passed in 0.20s =======
 ```
 
 `PASSED` means every `assert` in that test was true.

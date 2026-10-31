@@ -415,13 +415,10 @@ def pick_voice_line(character="orc"):
 
 
 def fetch_random_clip():
-    """One random clip from this channel, using the app token in clips.py."""
+    """One random clip from the recent top WoW list, using the app token in clips.py."""
 
-    broadcaster_id = os.getenv("BROADCASTER_USER_ID")
-    if not broadcaster_id:
-        raise RuntimeError("BROADCASTER_USER_ID is not set")
     token = clips.get_app_token()
-    found = clips.get_broadcaster_clips(token, broadcaster_id)
+    found = clips.get_top_wow_clips(token)
     if not found:
         return None
     return random.choice(found)
