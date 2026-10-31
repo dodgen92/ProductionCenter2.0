@@ -59,7 +59,7 @@ A passing run looks like this:
 tests/test_examples.py::test_welcome_message_creates_subscriptions PASSED
 tests/test_examples.py::test_notification_publishes_to_events PASSED
 ...
-======= 14 passed in 0.20s =======
+======= 21 passed in 0.30s =======
 ```
 
 `PASSED` means every `assert` in that test was true.
@@ -150,3 +150,21 @@ Read `test_notification_publishes_to_events` next. It feeds a follow notificatio
 6. Run `pytest -v` and read the bottom line.
 
 Do not point a test at real Twitch or a live OBS. If a test needs a file, use pytest's `tmp_path` (a temp folder that goes away after the test) the way the credits and clip tests do.
+
+## Clip library tests
+
+`tests/test_clip_library.py` checks the downloaded mp4 library. Helix and yt-dlp are mocks, same idea as the translate test. Nothing in that file opens a socket.
+
+`test_play_a_clip_publishes_clip_and_voice_line` in `test_examples.py` still covers the embed fallback (an empty library). The new file covers the index, the top-5 merge, the 24 hour WoW request, a local `video_url`, and `GET /clips`.
+
+## Manual test: Play a Clip with sound
+
+The unit tests never download a real clip. To hear one in OBS:
+
+1. `pip install -r requirements.txt` (this installs yt-dlp).
+2. Start `python Server.py` and watch the log for `downloaded N clips`.
+3. In OBS, add a Browser source. Leave **Local file** unchecked. URL: `http://localhost:5000/widgets/orc-clip/index.html?parent=localhost`
+4. Start the Twitch CLI mock: `twitch event websocket start-server`
+5. Set `EVENTSUB_WS_URL=ws://127.0.0.1:8080/ws` and start the server again.
+6. Trigger the reward: `twitch event trigger channel.channel_points_custom_reward_redemption.add --transport=websocket --item-name "Play a Clip"`
+7. The clip should play with sound, and the header should show the channel name.

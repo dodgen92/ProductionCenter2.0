@@ -10,3 +10,4 @@ keyboard
 PyAudio
 PyAutoGUI
 SpeechRecognition
+yt-dlp

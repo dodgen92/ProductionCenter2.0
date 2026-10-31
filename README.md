@@ -1,6 +1,6 @@
 # 🎬 Production Center
 
-**A live-stream control room that lets Twitch chat run the show.** Viewers spend channel points, and Production Center reacts in real time: it flips camera filters, rips animated Pokémon cards onto the screen, starts or stops automatic clipping that posts highlights straight to Discord, and can roll a random World of Warcraft clip with an orc voice line.
+**A live-stream control room that lets Twitch chat run the show.** Viewers spend channel points, and Production Center reacts in real time: it flips camera filters, rips animated Pokémon cards onto the screen, starts or stops automatic clipping that posts highlights straight to Discord, and can roll a downloaded Twitch clip with an orc voice line.
 
 Widgets on this PC (the Fact Gnome, the translator, the orc, end credits) read one local feed from this server. The server connects out to Twitch EventSub over a WebSocket. Twitch does not call back into this PC.
 
@@ -16,7 +16,7 @@ Widgets on this PC (the Fact Gnome, the translator, the orc, end credits) read o
 | **Add Camera Filter** | Applies a random camera filter (via AutoHotkey hotkeys), then clears it after 3 minutes. |
 | **Rip a Vintage Pokémon Card** | Pulls a random Gen 1 card the viewer hasn't caught yet, slides it across the screen with an eased OBS animation, and shows their progress toward all 151. Each viewer's collection is saved. |
 | **Start** / **Stop** | Starts or stops an auto-clipping loop that creates Twitch clips on a timer and posts each one to a Discord channel. |
-| **Play a Clip** | Picks a random clip from the recent top World of Warcraft clips and a random file from `voice_lines/orc/`, then publishes a `clip` event for the orc widget. The title match ignores case. Rename it with `CLIP_REWARD_TITLE` if you want. |
+| **Play a Clip** | Plays a random mp4 from the local clip library (top World of Warcraft clips plus a few of the most-viewed clips on Twitch, downloaded when the server starts) and a random file from `voice_lines/orc/`. The orc widget gets a `clip` event. If the library is empty, it falls back to a Twitch embed. The title match ignores case. Rename it with `CLIP_REWARD_TITLE` if you want. |
 | **Translate to English** / **Translate from English** | Not handled inside the reward `if` chain. Every redemption is published on `/events` (including the viewer's text). The translator widget sees those and calls `/translate` and `/tts`. Create both rewards with "Require viewer to enter text" turned on. |
 
 Follows, subs, resubs, gifted subs, and cheers are published on the same feed and collected for the end-credits roll.
@@ -47,6 +47,7 @@ flowchart LR
 - **Twitch EventSub WebSocket** via `websocket-client` (redemptions, follows, subs, cheers) and **Twitch Helix API** (subscriptions and clips)
 - **OBS WebSocket v5** via `obsws-python` (scene item animation and text updates)
 - **edge-tts** (free neural voices for widgets). ElevenLabs is optional.
+- **yt-dlp** (downloads Twitch clips as mp4 files for Play a Clip)
 - **AutoHotkey** (camera filter hotkeys)
 - **Discord webhooks** (clip notifications)
 - **Pillow** (`sheetripper.py` slices card sheets into individual card images)
@@ -56,20 +57,21 @@ flowchart LR
 ```
 Server.py              Flask server: EventSub WebSocket, feed, TTS, translate, credits
 archive.py             Auto-clipping loop (Twitch Helix) + Discord posting
-clips.py               App access token + Helix clip lookups
+clips.py               App access token, Helix clip lookups, and the mp4 downloader
+clips_cache/           Downloaded mp4 clips and index.json (gitignored; rebuilt on startup)
+widgets/               HTML widgets served at /widgets/ (orc, monk, gnome, and the rest)
 Pokemon/pokerip.py     Pokémon card pull logic + OBS animation
 pokemon_catches.json   Saved per-viewer collections
 credits.html           End-credits page for an OBS browser source
 banned_words.txt       Optional whole-word filter (empty = off)
 voice_lines/orc/       Drop recorded mp3/wav lines here
-                           Widgets stay in WIDGETS_DIR (not in this repo)
 CameraFilters/         Random filter picker, clear script, AutoHotkey filter hotkeys
 sheetripper.py         Utility: cut card sheets into single card images
 unsubscribe.py         Utility: remove EventSub subscriptions (WebSocket or old webhook)
 tests/                 Example pytest tests and a short guide
 ```
 
-`tts_cache/` and `stream_credits.json` are created at runtime and gitignored. `stream_credits.json` holds viewer display names for the current roll.
+`tts_cache/`, `stream_credits.json`, and the files inside `clips_cache/` are created at runtime and gitignored. `stream_credits.json` holds viewer display names for the current roll. `clips_cache/index.json` is the list of mp4s the orc can play.
 
 ## 🔐 Twitch scopes and how subscribing works
 
@@ -112,8 +114,8 @@ Play a Clip does **not** use that user token. It uses an app token from `clips.p
 6. Leave `EVENTSUB_WS_URL` blank for real Twitch. Set it only when you point the client at the Twitch CLI mock (see below).
 7. Create the channel point rewards in the Creator Dashboard (table above). Titles for the old rewards must match exactly. **Play a Clip** ignores case.
 8. Drop at least one `.mp3` or `.wav` in `voice_lines/orc/` if you want the orc to talk. With zero files the clip event is still published and `voice_line` is empty. The clip event also includes `reward` (the channel-point title) so a widget can filter on `?reward=`.
-9. Set `WIDGETS_DIR` to your Stream-Widgets folder. On this PC that is `C:\Users\tyler\Desktop\Stream-Widgets`. The server does not bake that path in. If the variable is blank or the folder is not there, `/widgets/...` returns 404 and prints why.
-10. Optional: `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` for `/tts?engine=eleven`. Optional: `DEEPL_API_KEY` as the last translation fallback. Optional: add lines to `banned_words.txt`.
+9. Widgets now live in the `widgets/` folder in this repo. Delete `WIDGETS_DIR` from `.env`, or leave it blank, to serve those. Keep the old line only if you still want the Desktop folder (`C:\Users\tyler\Desktop\Stream-Widgets`) instead.
+10. Run `pip install -r requirements.txt` again so `yt-dlp` is installed. Play a Clip uses it to save mp4 files. Optional: `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` for `/tts?engine=eleven`. Optional: `DEEPL_API_KEY` as the last translation fallback. Optional: add lines to `banned_words.txt`.
 
 `/translate` tries, in order: Google's free `translate.googleapis.com` `client=gtx` endpoint (no key), then [MyMemory](https://mymemory.translated.net/) (no key), then DeepL only if `DEEPL_API_KEY` is set. The Google endpoint is unofficial. It can change or rate-limit, which is why the fallbacks exist.
 
@@ -146,7 +148,7 @@ Names in `.env.example`:
 | `CLIP_REWARD_TITLE` | No | Reward title to listen for. Blank means `Play a Clip`. |
 | `ELEVENLABS_API_KEY` / `ELEVENLABS_VOICE_ID` | No | Paid TTS. Blank uses edge-tts. |
 | `DEEPL_API_KEY` | No | Last translation engine. Blank skips DeepL. |
-| `WIDGETS_DIR` | For HTML widgets | Full path to the widgets folder. On this PC that is `C:\Users\tyler\Desktop\Stream-Widgets`. Blank means `/widgets/...` returns 404. |
+| `WIDGETS_DIR` | No | Override for the widgets folder. Blank serves `widgets/` in this repo. Set it only to use a different folder. |
 | `GEMINI_API_KEY` | For Benito and Ask the Monk | Same key Benito already uses. The monk returns a canned saying if it is blank. |
 | `COUNSEL_MODEL` | No | Blank means `gemini-2.5-flash-lite`. |
 | `COUNSEL_USER_COOLDOWN` | No | Seconds between Gemini answers for one viewer. Blank means 60. |
@@ -216,15 +218,58 @@ Twitch will not play a clip embed on a `file://` page. Add each widget as a **Br
 http://localhost:5000/widgets/<widget>/index.html
 ```
 
-`<widget>` is the folder name inside `WIDGETS_DIR`. Example, if the orc presenter lives in a folder named `orc-clip`:
+`<widget>` is the folder name inside `widgets/` (or inside `WIDGETS_DIR`, if you set one). The orc presenter is `orc-clip`:
 
 ```
-http://localhost:5000/widgets/orc-clip/index.html
+http://localhost:5000/widgets/orc-clip/index.html?parent=localhost
 ```
 
-Use `http://127.0.0.1:5000/...` if `localhost` misbehaves. The route only serves files inside `WIDGETS_DIR` (`send_from_directory` blocks `..`). Responses send `Cache-Control: no-store`, so an OBS "Refresh cache of current page" picks up edits.
+Use `http://127.0.0.1:5000/...` if `localhost` misbehaves. The route only serves files inside that folder (`send_from_directory` blocks `..`). Responses send `Cache-Control: no-store`, so an OBS "Refresh cache of current page" picks up edits.
 
-### 9. Ask the Monk
+### 9. Play a Clip with sound
+On startup the server starts a background download. It does not wait for the files before it opens port 5000. It deletes the old files in `clips_cache/`, asks Helix for clips, saves each one as an mp4 with yt-dlp, and writes `clips_cache/index.json`. Watch the log for a line like `downloaded 12 clips`. A clip that fails is skipped. The others are still saved.
+
+The library is:
+
+- the 10 most-viewed World of Warcraft clips from the last 24 hours
+- the 5 most-viewed clips from the last 24 hours across the 50 games that currently have the most viewers
+
+Helix cannot list "all of Twitch" in one call. Get Clips needs a channel, a game, or a clip id. The top-games list is the supported way to approximate a site-wide top 5. If the same clip shows up in both lists, it is downloaded once.
+
+A **Play a Clip** redeem picks a random row from the index and publishes a `clip` event. `video_url` is `/clips/<file>.mp4`, and `broadcaster_name` is the channel the clip came from. The widget plays that file in a normal `<video>` tag, which is allowed to autoplay with sound inside OBS. The older embed fields are still on the event. If `clips_cache` is empty because the download has not finished, the server falls back to the old behavior: it asks Helix for the recent top WoW clips (the same 200 hour list `python clips.py` prints), picks one, and publishes the embed. That fallback includes `broadcaster_name` too. `video_url` is blank, so the widget uses the iframe.
+
+`GET /clips/<file>` serves the mp4 from this PC only, same as the other routes.
+
+Manual check, after `pip install -r requirements.txt`:
+
+1. Start the server and wait for `downloaded N clips` in the log.
+2. In OBS, add a Browser source. Leave **Local file** unchecked. URL:
+
+```
+http://localhost:5000/widgets/orc-clip/index.html?parent=localhost
+```
+
+3. In another terminal, start the Twitch CLI mock and point the server at it:
+
+```
+twitch event websocket start-server
+```
+
+```
+EVENTSUB_WS_URL=ws://127.0.0.1:8080/ws
+```
+
+4. Restart the server so it connects to the mock, then trigger the reward:
+
+```
+twitch event trigger channel.channel_points_custom_reward_redemption.add --transport=websocket --item-name "Play a Clip"
+```
+
+5. The clip should play with sound, and the header should show the channel name (`CHANNEL: Title`).
+
+`python clips.py` still prints a WoW clip list and does not download anything. That script keeps its older 200 hour window. The library the orc plays uses 24 hours.
+
+### 10. Ask the Monk
 Create a channel point reward named **Ask the Monk** with "Require viewer to enter text" on. The widget reads that redemption from `/events` and calls `GET /counsel`. The server uses the same `GEMINI_API_KEY` as Benito. It never sends the key to the widget. A blocked word, a viewer who just asked, a full daily cap, or any Gemini error returns one of 30 canned sayings (`"source": "canned"`) instead. Counts for the monk and Benito share `gemini_usage.json` (gitignored). The monk voice on `/tts` is `en-HK-SamNeural`.
 
 ```bash
@@ -233,7 +278,7 @@ curl "http://localhost:5000/counsel?q=tank%20or%20healer&user=test"
 
 ## 🧪 Tests
 
-Example tests live in `tests/`. The guide in [`tests/README.md`](tests/README.md) explains what a unit test is, what a mock is, how to run them, and walks through one test line by line.
+Example tests live in `tests/`. The guide in [`tests/README.md`](tests/README.md) explains what a unit test is, what a mock is, how to run them, and walks through one test line by line. `tests/test_clip_library.py` checks the mp4 library without calling Twitch or yt-dlp's downloader. The same guide has the manual OBS check for Play a Clip.
 
 ```bash
 pip install -r requirements-dev.txt

@@ -1,0 +1,20 @@
+@font-face{font-family:'Archivo Narrow Local';src:url('ArchivoNarrow.ttf') format('truetype');font-weight:400 700}
+:root{--x:20px;--y:auto;--b:110px;--w:540px;--h:240px;--size:16px;--opacity:.85;
+ --bg:18,16,10;--gold:#3a3020;--tabtext:#FFD100;
+ --font:'Archivo Narrow Local','Archivo Narrow','Arial Narrow',sans-serif}
+html,body{margin:0;padding:0;background:transparent;width:1920px;height:1080px;overflow:hidden}
+#frame{position:absolute;left:var(--x);top:var(--y);bottom:var(--b);width:var(--w);height:var(--h);font-family:var(--font)}
+#tabs{position:absolute;top:-23px;left:8px;display:flex;gap:3px}
+.tab{height:22px;padding:0 13px;line-height:23px;font-size:13px;font-weight:600;color:var(--tabtext);opacity:.45;
+ background:rgba(var(--bg),var(--opacity));border:1px solid var(--gold);border-bottom:none;border-radius:7px 7px 0 0;text-shadow:1px 1px 0 #000}
+.tab.active{opacity:1}
+#panel{position:absolute;inset:0;background:rgba(var(--bg),var(--opacity));border:2px solid var(--gold);border-radius:5px;box-sizing:border-box;
+ box-shadow:0 0 6px rgba(0,0,0,.5);overflow:hidden}
+#lines{position:absolute;left:7px;right:7px;bottom:5px;display:flex;flex-direction:column}
+.line{font-size:var(--size);line-height:1.18;font-weight:600;color:#fff;overflow-wrap:anywhere;text-shadow:1px 1px 1px rgba(0,0,0,.9);
+ animation:in .3s ease-out;transition:opacity 1s}
+.line.out{opacity:0}
+.line img{height:1.35em;vertical-align:-.35em}
+.ts{opacity:.75}
+#hint{position:absolute;left:8px;top:8px;color:#FFD100;font-size:14px;text-shadow:1px 1px 0 #000}
+@keyframes in{from{opacity:0;transform:translateY(5px)}to{opacity:1}}

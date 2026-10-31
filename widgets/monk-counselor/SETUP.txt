@@ -1,0 +1,3 @@
+OBS: Browser source, untick "Local file", URL file:///C:/Users/tyler/Desktop/Stream-Widgets/monk-counselor/index.html , 1920x1080.
+Twitch: create channel point reward "Ask the Monk" with "Require viewer to enter text" ON (or set ?reward=Your Name).
+Preview: add ?test=1 to the URL. Live answers need the Production Center /counsel route (see PRODUCTION-CENTER-SPEC.md).
