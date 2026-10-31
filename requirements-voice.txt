@@ -1,0 +1,5 @@
+# Python 3.12 venv for widgets/fact-gnome/tools/make_gnome_voices.py only.
+# Do not install this into the server environment. kokoro pulls in torch.
+kokoro
+soundfile
+numpy

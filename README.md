@@ -276,6 +276,27 @@ Create a channel point reward named **Ask the Monk** with "Require viewer to ent
 curl "http://localhost:5000/counsel?q=tank%20or%20healer&user=test"
 ```
 
+### 11. Fact Gnome pre-recorded voice
+
+The Fact Gnome plays a Kokoro wav from `widgets/fact-gnome/voice/` when that fact is in `voice/voices.js`. If the line is missing, it falls back to live `/tts`, then the browser voice. `?prerec=0` skips the recordings. Those wavs and `voices.js` stay on this PC (they are gitignored). Kokoro is not part of the server install.
+
+Use a separate Python 3.12 venv so Kokoro's torch stays out of the server environment. In PowerShell, from the project folder:
+
+```powershell
+py -3.12 -m venv .venv-voice
+.\.venv-voice\Scripts\Activate.ps1
+pip install -r requirements-voice.txt
+python widgets\fact-gnome\tools\make_gnome_voices.py
+```
+
+The first run downloads the Kokoro model. `--voice` can be `af_bella` (the default), `af_heart`, or `bf_emma`. `--speed` defaults to `1.1`.
+
+```powershell
+python widgets\fact-gnome\tools\make_gnome_voices.py --voice af_heart --speed 1.1
+```
+
+In OBS, refresh the Fact Gnome browser source. Rerun the script whenever `widgets/fact-gnome/facts/facts.js` changes. Lines that already exist are skipped, and audio for a deleted fact is removed.
+
 ## 🧪 Tests
 
 Example tests live in `tests/`. The guide in [`tests/README.md`](tests/README.md) explains what a unit test is, what a mock is, how to run them, and walks through one test line by line. `tests/test_clip_library.py` checks the mp4 library without calling Twitch or yt-dlp's downloader. The same guide has the manual OBS check for Play a Clip.

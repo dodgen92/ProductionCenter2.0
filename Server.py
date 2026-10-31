@@ -663,6 +663,7 @@ TTS_VOICES = {
     "en-US-AshleyNeural",
     "en-GB-SoniaNeural",
     "en-AU-NatashaNeural",
+    "en-IE-EmilyNeural",
     "es-MX-DaliaNeural",
     "pt-BR-FranciscaNeural",
     "fr-FR-DeniseNeural",

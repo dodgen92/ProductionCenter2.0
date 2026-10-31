@@ -6,6 +6,7 @@
 # Python virtual environment
 venv/
 .venv/
+.venv-voice/
 
 # Python cache
 __pycache__/
@@ -31,6 +32,9 @@ voice_lines/*
 voice_lines/orc/*
 !voice_lines/orc/.gitkeep
 !voice_lines/orc/README.md
+
+# Generated Fact Gnome lines (Kokoro wavs and voice/voices.js). Stay on this PC.
+widgets/fact-gnome/voice/
 
 # Local test notes. Do not commit.
 tests.txt
