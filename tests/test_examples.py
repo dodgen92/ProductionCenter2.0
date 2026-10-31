@@ -382,24 +382,28 @@ def test_translate_returns_text_and_detected_language(client, monkeypatch):
 
 
 def test_play_a_clip_publishes_clip_and_voice_line(monkeypatch, tmp_path):
-    """Play a Clip asks Helix for a clip, picks a local voice line, and publishes both."""
+    """Play a Clip asks for a top WoW clip, picks a local voice line, and publishes both."""
 
-    # Arrange: two fake recordings, and Helix replaced by a function that returns one clip.
+    # Proves: the clip on the orc event is one that get_top_wow_clips returned,
+    # and a voice line from the orc folder goes out with it. No Twitch call.
+
+    # Arrange: two fake recordings, and the WoW list replaced by one clip.
     orc = tmp_path / "orc"
     orc.mkdir()
     (orc / "hello.mp3").write_bytes(b"not really audio")
     (orc / "charge.wav").write_bytes(b"not really audio")
     monkeypatch.setattr(Server, "VOICE_LINES_DIR", tmp_path)
-    monkeypatch.setenv("BROADCASTER_USER_ID", "12345")
+    # This reward no longer reads the channel id. Remove it so a leftover
+    # requirement would fail the test instead of quietly using the fake id.
+    monkeypatch.delenv("BROADCASTER_USER_ID", raising=False)
 
     seen = {}
 
     def fake_token():
         return "app-token"
 
-    def fake_clips(token, broadcaster_id):
+    def fake_wow_clips(token):
         seen["token"] = token
-        seen["broadcaster_id"] = broadcaster_id
         return [{
             "id": "ClipId",
             "url": "https://clips.twitch.tv/ClipId",
@@ -411,12 +415,12 @@ def test_play_a_clip_publishes_clip_and_voice_line(monkeypatch, tmp_path):
         }]
 
     monkeypatch.setattr(Server.clips, "get_app_token", fake_token)
-    monkeypatch.setattr(Server.clips, "get_broadcaster_clips", fake_clips)
+    monkeypatch.setattr(Server.clips, "get_top_wow_clips", fake_wow_clips)
 
     # Act: call the reward function directly, so we don't wait on a background thread.
     Server.play_clip_for("RemyFriend", "remyfriend")
 
-    # Assert
+    # Assert: the published clip is the one from the fake WoW list.
     assert len(Server.EVENTS) == 1
     event = Server.EVENTS[0]
     assert event["type"] == "clip"
@@ -434,7 +438,49 @@ def test_play_a_clip_publishes_clip_and_voice_line(monkeypatch, tmp_path):
         "/voice_lines/orc/charge.wav",
     }
     assert seen["token"] == "app-token"
-    assert seen["broadcaster_id"] == "12345"
+
+
+def test_play_a_clip_with_no_wow_clips_publishes_empty_fields(monkeypatch, tmp_path):
+    """An empty WoW clip list still publishes a clip event with blank clip fields."""
+
+    # Proves: zero clips from get_top_wow_clips does not crash. The orc event
+    # still goes out, and the clip fields are empty instead of made-up data.
+
+    # Arrange: no voice files, and the WoW lookup returns an empty list.
+    monkeypatch.setattr(Server, "VOICE_LINES_DIR", tmp_path)
+    monkeypatch.delenv("BROADCASTER_USER_ID", raising=False)
+
+    seen = {}
+
+    def fake_token():
+        return "app-token"
+
+    def fake_wow_clips(token):
+        seen["token"] = token
+        return []
+
+    monkeypatch.setattr(Server.clips, "get_app_token", fake_token)
+    monkeypatch.setattr(Server.clips, "get_top_wow_clips", fake_wow_clips)
+
+    # Act
+    Server.play_clip_for("RemyFriend", "remyfriend", "Play a Clip")
+
+    # Assert: one clip event, and every clip field is blank.
+    assert seen["token"] == "app-token"
+    assert len(Server.EVENTS) == 1
+    event = Server.EVENTS[0]
+    assert event["type"] == "clip"
+    assert event["user"] == "RemyFriend"
+    assert event["login"] == "remyfriend"
+    assert event["clip_id"] == ""
+    assert event["clip_url"] == ""
+    assert event["embed_url"] == ""
+    assert event["title"] == ""
+    assert event["creator"] == ""
+    assert event["duration"] == 0
+    assert event["thumbnail_url"] == ""
+    assert event["voice_line"] == ""
+    assert event["reward"] == "Play a Clip"
 
 
 def test_widgets_are_local_files_inside_one_folder(client, monkeypatch, tmp_path):
