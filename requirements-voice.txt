@@ -3,3 +3,5 @@
 kokoro
 soundfile
 numpy
+# Pitch shift (--pitch) and the ghoul effect. Not a torch package.
+scipy
