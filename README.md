@@ -289,13 +289,19 @@ pip install -r requirements-voice.txt
 python widgets\fact-gnome\tools\make_gnome_voices.py
 ```
 
-The first run downloads the Kokoro model. `--voice` can be `af_bella` (the default), `af_heart`, or `bf_emma`. `--speed` defaults to `1.1`.
+The first run downloads the Kokoro model. `--voice` can be `af_bella` (the default), `af_nicole`, `af_heart`, or `bf_emma`. `--speed` defaults to `1.1`. A venv folder named `voice_env` is gitignored too. If that is the one you already made, activate it with `.\voice_env\Scripts\Activate.ps1`.
+
+Kokoro cannot change pitch itself, so `--pitch` shifts the finished line and keeps it the same length. `2` is a bit higher. `--ghoul` is an undead take: about 4 semitones lower (unless you also pass `--pitch`), a little grit, and a short hollow echo.
 
 ```powershell
 python widgets\fact-gnome\tools\make_gnome_voices.py --voice af_heart --speed 1.1
+python widgets\fact-gnome\tools\make_gnome_voices.py --voice af_nicole --pitch 2
+python widgets\fact-gnome\tools\make_gnome_voices.py --voice af_nicole --ghoul
 ```
 
-In OBS, refresh the Fact Gnome browser source. Rerun the script whenever `widgets/fact-gnome/facts/facts.js` changes. Lines that already exist are skipped, and audio for a deleted fact is removed.
+`widgets/fact-gnome/facts/spoken.js` is optional. The bubble still shows the plain fact from `facts.js`. If that exact text is a key in `spoken.js`, Kokoro says the value instead. The value can use Kokoro markup: `[Staats](/stˈæts/)` for a pronunciation, `[them](+1)` for stress, and `…` `—` `;` for pauses. `voices.js` stays keyed by the plain fact. A fact with no spoken line is read as written, and its file name stays the same as before. The spoken.js in the repo already has a line for every current fact, so the next run rebuilds every wav and removes the old files.
+
+In OBS, refresh the Fact Gnome browser source. Rerun the script when `facts.js` or `spoken.js` changes, or when you change `--pitch` or `--ghoul`. Lines that already exist for the same settings are skipped, and audio for a deleted fact is removed.
 
 ## 🧪 Tests
 
