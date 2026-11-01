@@ -2,13 +2,16 @@
 'use strict';
 const P=new URLSearchParams(location.search),g=k=>P.get(k);
 const CH=(g('channel')||g('twitch')||'').replace(/^#/,'').toLowerCase().trim();
-const TEST=g('test')==='1',ONCE=g('once')==='1';
+const TESTKEY=(g('test')||'').toLowerCase(),ONCE=g('once')==='1';
+// test=1 cycles every kind. test=follow (or sub, resub, gift, bits, cheer, raid) fires that one.
+const TESTONE={sub:1,resub:1,gift:1,bits:1,cheer:1,raid:1,follow:1};
+const TEST=TESTKEY==='1'||TESTKEY==='all'||!!TESTONE[TESTKEY];
 const BITSMIN=Math.max(1,+(g('bitsmin')||1)),RAIDS=g('raids')!=='0',BITS=g('bits')!=='0';
 const FOLLOWS=g('follows')!=='0',FDUR=Math.max(2,+(g('followdur')||3.5))*1000;
 const SERVER=(g('server')||'http://localhost:5000').replace(/\/+$/,''),USE_SERVER=g('server')!=='0';
 const DUR=Math.max(4,+(g('duration')||6))*1000;
 const stage=document.getElementById('stage'),sway=document.getElementById('sway'),talkEl=document.getElementById('talk');
-const hdr=document.getElementById('hdr'),msg=document.getElementById('msg'),subEl=document.getElementById('sub'),note=document.getElementById('note');
+const hdr=document.getElementById('hdr'),msg=document.getElementById('msg'),subEl=document.getElementById('sub'),lineEl=document.getElementById('line'),note=document.getElementById('note');
 const pos=(g('pos')||'bl').toLowerCase();stage.className=['bl','tl','l'].includes(pos)?pos:'bl';
 if(g('scale'))stage.style.setProperty('--scale',+g('scale')||1);
 if(g('x'))stage.style.setProperty('--x',(+g('x')||0)+'px');
@@ -19,7 +22,7 @@ const set=(...c)=>{stage.className=[base,...c].filter(Boolean).join(' ');};
 const clean=s=>String(s||'').replace(/[\u0000-\u001f\u007f<>&"'`]/g,'').trim().slice(0,25)||'friend';
 
 
-// ---- sounds: random mp3 from sounds/ each time he fires ----
+// ---- sounds: fallback mp3 from sounds/ when this alert has no voice line ----
 const SOUND_ON=g('sound')!=='0',VOL=Math.min(1,Math.max(0,g('vol')==null?0.8:+g('vol')));
 let sounds=(Array.isArray(window.PALADIN_SOUNDS)?window.PALADIN_SOUNDS:[]).map(f=>String(f).trim()).filter(Boolean).map(f=>'sounds/'+encodeURI(f));
 if(SOUND_ON&&!sounds.length){const found=[];let pending=50;
@@ -32,6 +35,54 @@ function playSound(){if(!SOUND_ON||!sounds.length)return;
   let i=Math.floor(Math.random()*sounds.length);if(sounds.length>1&&i===lastSnd)i=(i+1)%sounds.length;lastSnd=i;
   const a=new Audio(sounds[i]);a.volume=VOL;a.play().catch(e=>console.warn('paladin sound',e));
   window.paladinSub&&(window.paladinSub.lastSound=sounds[i]);}
+
+// ---- voice lines (lines.js): one recorded take per alert ----
+// dono = sub, resub, gift, bits. follow = follows. raid = raids.
+// Pick at random, but not the same file as last time (a pool of one always repeats).
+const LINES=window.PALADIN_LINES||{};
+const lastLine={dono:'',follow:'',raid:''};
+function linePool(type){
+  if(type==='follow')return 'follow';
+  if(type==='raid')return 'raid';
+  if(type==='sub'||type==='resub'||type==='gift'||type==='bits')return 'dono';
+  return '';
+}
+function pickLine(type){
+  const key=linePool(type);
+  const pool=(Array.isArray(LINES[key])?LINES[key]:[]).filter(row=>row&&row.file&&row.text);
+  if(!pool.length)return null;
+  let i=Math.floor(Math.random()*pool.length);
+  if(pool.length>1&&pool[i].file===lastLine[key])i=(i+1)%pool.length;
+  lastLine[key]=pool[i].file;
+  return pool[i];
+}
+// Resolves when the mp3 ends. If it never loads, give up after a few seconds
+// so the queue can move on. The long timer is only for a clip that starts and never ends.
+function playVoice(entry){
+  if(!entry||!SOUND_ON)return Promise.resolve();
+  return new Promise(resolve=>{
+    let settled=false;
+    const audio=new Audio('audio/'+encodeURI(entry.file));
+    audio.volume=VOL;
+    let cap=setTimeout(finish,90000);
+    function finish(){
+      if(settled)return;
+      settled=true;
+      clearTimeout(cap);
+      try{audio.pause();}catch(e){}
+      resolve();
+    }
+    function fail(){
+      clearTimeout(cap);
+      cap=setTimeout(finish,6000);
+    }
+    audio.addEventListener('ended',finish);
+    audio.addEventListener('error',fail);
+    audio.play().then(()=>{
+      window.paladinSub&&(window.paladinSub.lastSound='audio/'+entry.file);
+    }).catch(fail);
+  });
+}
 
 const queue=[];let busy=false;
 function alertSub(ev){queue.push(ev);if(!busy)run();}
@@ -51,19 +102,31 @@ async function typeSegs(segs,D){msg.textContent='';const total=segs.reduce((n,s)
 async function run(){
   busy=true;
   while(queue.length){
-    let ev=queue.shift();if(ev.type==='follow')ev=takeFollows(ev);const name=clean(ev.name),fol=ev.type==='follow',D=fol?FDUR:DUR;const gift=ev.type==='gift';
-    const raid=ev.type==='raid',bits=ev.type==='bits';
+    let ev=queue.shift();
+    if(ev.type==='follow')ev=takeFollows(ev);
+    const name=clean(ev.name),fol=ev.type==='follow',D=fol?FDUR:DUR;
+    const gift=ev.type==='gift',raid=ev.type==='raid',bits=ev.type==='bits';
+    const line=pickLine(ev.type);
     hdr.textContent=fol?'New follower!':raid?'Incoming raid!':bits?`${ev.count} bits!`:gift?(ev.count>1?`${ev.count} gifted subs!`:'Gifted sub!'):(ev.type==='resub'?'Resub!':'New sub!');
     subEl.textContent=fol?'':raid?`${ev.count} raiders!`:ev.type==='resub'&&ev.months>1?`${ev.months} months!`:'';
     msg.textContent='';
-    if(!fol)playSound(); // follows are ALWAYS silent (chain follows)
+    if(lineEl)lineEl.textContent=line?line.text:'';
+    // A voice line replaces the old random mp3. Follows with no line stay silent.
+    let voice=Promise.resolve();
+    if(line)voice=playVoice(line);
+    else if(!fol)playSound();
     set('in','flare');await wait(fol?600:1000);
     set('in','show','talking');await wait(fol?150:350);
     const t0=Date.now();
     await typeSegs(fol?followSegs(ev):raid?[{t:'Welcome raiders! Thanks for the raid, '},{t:name,b:1},{t:'!'}]:bits?[{t:'Thanks for the bits, '},{t:name,b:1},{t:'!'}]:gift?[{t:'Thanks for the gifted subs, '},{t:name,b:1},{t:'!'}]:[{t:'Thanks for subscribing, '},{t:name,b:1},{t:'!'}],D);
+    const minLeft=Math.max(1200,D-(fol?750:1350)-(Date.now()-t0)-(fol?800:1100));
+    // Stay up until the spoken line ends, and at least as long as the old timer.
+    await Promise.all([voice,wait(minLeft)]);
     set('in','show');
-    await wait(Math.max(1200,D-(fol?750:1350)-(Date.now()-t0)-(fol?800:1100)));
-    set('out');await wait(850);set();await wait(300);
+    await wait(200);
+    set('out');await wait(850);set();
+    if(lineEl)lineEl.textContent='';
+    await wait(300);
   }
   busy=false;
 }
@@ -94,8 +157,24 @@ if(USE_SERVER&&!(TEST&&g('server')==null)){let since=-1,delay=1000;
     setTimeout(poll,delay);
   })();}
 
-if(TEST){const evs=[{type:'sub',name:'Thrallbert'},{type:'resub',name:'Jainabelle',months:14},{type:'gift',name:'Murlocmaster',count:5},{type:'raid',name:'Sylvanazz',count:42},{type:'bits',name:'Goldfarmer',count:500},{type:'follow',name:'Peonwork'}];let i=0;
-  alertSub(evs[i++]);if(!ONCE)setInterval(()=>alertSub(evs[i++%evs.length]),9000);return;}
+if(TEST){
+  const samples={
+    sub:{type:'sub',name:'Thrallbert'},
+    resub:{type:'resub',name:'Jainabelle',months:14},
+    gift:{type:'gift',name:'Murlocmaster',count:5},
+    raid:{type:'raid',name:'Sylvanazz',count:42},
+    bits:{type:'bits',name:'Goldfarmer',count:500},
+    cheer:{type:'bits',name:'Cal',count:100},
+    follow:{type:'follow',name:'Peonwork'}
+  };
+  const order=['sub','resub','gift','raid','bits','follow'];
+  const keys=samples[TESTKEY]?[TESTKEY]:order;
+  let i=0;
+  const fire=()=>alertSub(Object.assign({},samples[keys[i++%keys.length]]));
+  fire();
+  if(!ONCE)setInterval(fire,9000);
+  return;
+}
 if(ONCE&&!CH){alertSub({type:'sub',name:'Thrallbert'});return;}
 if(!CH){if(USE_SERVER)return;note.hidden=false;note.textContent='Paladin Sub Alert: add ?channel=yourname to the URL';return;}
 

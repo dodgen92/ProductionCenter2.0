@@ -99,8 +99,11 @@ Put the access token in `TWITCH_OAUTH_TOKEN` and the app's client id in `TWITCH_
 | `moderator:read:followers` | Follows (`channel.follow` v2) |
 | `channel:read:subscriptions` | Subs, resubs, and gifted subs |
 | `bits:read` | Cheers (`channel.cheer` v1) |
+| (none) | Incoming raids (`channel.raid` v1) |
 
 Follow v2 also sends `moderator_user_id`. This server sets that to `BROADCASTER_USER_ID`, so the token has to belong to the broadcaster (you are always a mod on your own channel).
+
+Incoming raids are subscribed with `to_broadcaster_user_id` only. Twitch documents `channel.raid` as needing no authorization, so the token command above does not grow a fifth scope. Do not also send `from_broadcaster_user_id` on that subscription. Twitch rejects the request when both are set. Follows still need `moderator:read:followers`, and cheers still need `bits:read`. Those two were already subscribed. If the log shows 401 or 403 for one of them, the user token is missing that scope. Make a new token with the four scopes in the command above.
 
 Play a Clip does **not** use that user token. It uses an app token from `clips.py` (`client_credentials`), which needs `TWITCH_CLIENT_ID` plus `TWITCH_CLIENT_SECRET` (the client secret from the Twitch developer console). Reading clips does not add another scope on the user token.
 

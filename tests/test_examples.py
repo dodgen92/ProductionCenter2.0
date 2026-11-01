@@ -120,7 +120,7 @@ def test_welcome_message_creates_subscriptions(monkeypatch):
     # Assert: one Helix call per event type, all tied to this session.
     assert result == "welcome"
     assert client.keepalive_timeout == 12
-    assert len(posts) == 6
+    assert len(posts) == 7
     types = [item["json"]["type"] for item in posts]
     assert types == [
         "channel.channel_points_custom_reward_redemption.add",
@@ -129,6 +129,7 @@ def test_welcome_message_creates_subscriptions(monkeypatch):
         "channel.subscription.gift",
         "channel.subscription.message",
         "channel.cheer",
+        "channel.raid",
     ]
     for item in posts:
         assert item["url"] == Server.EVENTSUB_URL
@@ -144,6 +145,10 @@ def test_welcome_message_creates_subscriptions(monkeypatch):
         "broadcaster_user_id": "12345",
         "moderator_user_id": "12345",
     }
+    # Incoming raids only. Twitch rejects the sub if from_ and to_ are both set.
+    raid = posts[6]["json"]
+    assert raid["version"] == "1"
+    assert raid["condition"] == {"to_broadcaster_user_id": "12345"}
 
 
 def test_notification_publishes_to_events(monkeypatch):
