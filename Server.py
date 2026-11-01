@@ -1214,6 +1214,14 @@ def handle_notification(sub_type, event):
         add_credit("bits", user=user, login=login, amount=amount or None)
         return
 
+    if sub_type == "channel.raid":
+        # The raider is the "from" broadcaster. The widget reads user and viewers.
+        user = event.get("from_broadcaster_user_name") or ""
+        login = event.get("from_broadcaster_user_login") or ""
+        viewers = event.get("viewers") or 0
+        publish("raid", user=user, login=login, viewers=viewers)
+        return
+
     print(f"[Server] No handler for EventSub type: {sub_type}")
 
 
@@ -1329,6 +1337,9 @@ def subscribe_to_events(session_id):
     subscribe_event("channel.subscription.gift", "1", broadcaster, session_id)
     subscribe_event("channel.subscription.message", "1", broadcaster, session_id)
     subscribe_event("channel.cheer", "1", broadcaster, session_id)
+    # Incoming raids only. Setting from_broadcaster_user_id too makes Twitch reject it.
+    # channel.raid needs no extra token scope.
+    subscribe_event("channel.raid", "1", {"to_broadcaster_user_id": BROADCASTER_USER_ID}, session_id)
 
 
 # =============================

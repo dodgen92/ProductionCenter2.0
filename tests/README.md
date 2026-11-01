@@ -157,6 +157,15 @@ Do not point a test at real Twitch or a live OBS. If a test needs a file, use py
 
 `test_play_a_clip_publishes_clip_and_voice_line` in `test_examples.py` still covers the embed fallback (an empty library). The new file covers the index, the top-5 merge, the 24 hour WoW request, a local `video_url`, and `GET /clips`.
 
+## Paladin voice lines
+
+`tests/test_paladin_alerts.py` checks two things without opening a browser.
+
+- `lines.js` lists each mp3 in `widgets/paladin-sub/audio/`, and each line has text. Wording can change. A renamed file cannot.
+- A fake `channel.raid` notification is published on `GET /events` as `type: raid` with `user` and `viewers`. Follow, sub, resub, gift, and cheer keep the field names the widget already reads. Twitch and OBS are not called.
+
+The line picker is in `widgets/paladin-sub/paladin.js` (`pickLine`). It is browser code. To check it: start the server, open `http://localhost:5000/widgets/paladin-sub/index.html?test=sub&once=1`, refresh once, and confirm the parchment under the bubble is a different Dono sentence the second time. `?test=1` should let the next alert wait until the current mp3 ends.
+
 ## Manual test: Play a Clip with sound
 
 The unit tests never download a real clip. To hear one in OBS:
