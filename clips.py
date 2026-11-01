@@ -28,7 +28,7 @@ CLIPS_PER_GAME = 10
 
 
 def _client_id():
-    return os.getenv("TWITCH_CLIENT_ID")
+    return os.getenv("APP_CLIENT_ID") or os.getenv("CLIENT_ID")
 
 
 def _client_secret():
