@@ -444,6 +444,10 @@ def test_play_a_clip_publishes_clip_and_voice_line(monkeypatch, tmp_path):
         "/voice_lines/orc/hello.mp3",
         "/voice_lines/orc/charge.wav",
     }
+    # The fake list has one clip, so it is WoW #1. No view_count was on that clip.
+    assert event["source"] == "wow"
+    assert event["rank"] == 1
+    assert "view_count" not in event
     assert seen["token"] == "app-token"
 
 
@@ -488,6 +492,9 @@ def test_play_a_clip_with_no_wow_clips_publishes_empty_fields(monkeypatch, tmp_p
     assert event["thumbnail_url"] == ""
     assert event["voice_line"] == ""
     assert event["reward"] == "Play a Clip"
+    assert "source" not in event
+    assert "rank" not in event
+    assert "view_count" not in event
 
 
 def test_widgets_are_local_files_inside_one_folder(client, monkeypatch, tmp_path):

@@ -161,21 +161,68 @@ def _best_unique(clips, limit):
     return picked
 
 
+def clip_source(clip):
+    """'wow' or 'twitch' when this row was tagged. Blank otherwise."""
+
+    if not isinstance(clip, dict):
+        return ""
+    source = str(clip.get("source") or "").strip().lower()
+    if source in {"wow", "twitch"}:
+        return source
+    return ""
+
+
+def clip_rank(clip):
+    """1-based place in that list. 0 when the clip has no rank."""
+
+    if not isinstance(clip, dict):
+        return 0
+    try:
+        rank = int(clip.get("rank") or 0)
+    except (TypeError, ValueError):
+        return 0
+    if rank < 1:
+        return 0
+    return rank
+
+
+def _stamp(clip, source, rank):
+    """Copy a clip and tag which list it came from.
+
+    Rank 1 is the most-viewed clip in that list. The widget turns the rank
+    into a voice line. This function only stores the place.
+    """
+
+    stamped = dict(clip)
+    stamped["source"] = source
+    stamped["rank"] = rank
+    return stamped
+
+
+def _with_ranks(clips, source):
+    """Tag an already-sorted list. Place 1 is the first clip."""
+
+    return [_stamp(clip, source, index) for index, clip in enumerate(clips, start=1)]
+
+
 def choose_library_clips(wow_clips, game_clip_groups, wow_limit=WOW_TOP, global_limit=GLOBAL_TOP):
     """WoW's top clips, plus the top clips from the game lists, with no repeat ids.
 
-    A clip that is in both lists is downloaded once. It still counts as one of
-    the global top, so the library can be a little smaller than 15.
+    Each kept clip is tagged with source ('wow' or 'twitch') and rank.
+    Rank 1 is the most viewed in that list. A clip that is in both lists is
+    downloaded once and keeps the WoW tag, because the WoW list is added
+    first. It still uses up its place in the Twitch list, so the other
+    Twitch ranks do not shift up. The library can be a little smaller than 15.
     """
 
-    wow_picked = _best_unique(wow_clips, wow_limit)
+    wow_picked = _with_ranks(_best_unique(wow_clips, wow_limit), "wow")
     flat = []
     for group in game_clip_groups or []:
         if isinstance(group, dict):
             flat.append(group)
         else:
             flat.extend(group or [])
-    global_picked = _best_unique(flat, global_limit)
+    global_picked = _with_ranks(_best_unique(flat, global_limit), "twitch")
 
     chosen = []
     seen = set()
@@ -256,6 +303,8 @@ def index_entry(clip, filename):
         "creator": clip.get("creator_name") or clip.get("creator") or "",
         "duration": duration,
         "view_count": _views(clip),
+        "source": clip_source(clip),
+        "rank": clip_rank(clip),
         "thumbnail_url": clip.get("thumbnail_url") or "",
     }
 

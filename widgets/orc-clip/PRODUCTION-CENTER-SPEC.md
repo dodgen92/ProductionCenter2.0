@@ -1,10 +1,13 @@
 # Orc Clip Presenter: Production Center additions
 
 The clip event shape you proposed is fine as is:
-`{id, type:'clip', reward?, user, login, clip_id, clip_url, embed_url, title, creator, broadcaster_name, duration, video_url?, thumbnail_url, voice_line}`
+`{id, type:'clip', reward?, user, login, clip_id, clip_url, embed_url, title, creator, broadcaster_name, duration, video_url?, thumbnail_url, voice_line, view_count?, source?, rank?}`
 - `embed_url`: any `parent` you include is replaced by the widget, so you don't need to add one. `clip_id` alone is also enough.
 - `duration`: seconds (float) from Helix Get Clips. The widget relies on it to know when to hide.
-- `voice_line`: `/voice_lines/orc/<file>` is preferred. Empty string means no line.
+- `voice_line`: `/voice_lines/orc/<file>` is the fallback when `source` + `rank` do not match a line in `lines.js`. Empty string means no fallback line.
+- `source`: `wow` (top World of Warcraft clips) or `twitch` (top clips across Twitch). Omit it when the clip was not tagged.
+- `rank`: 1-based place in that list. 1 is the most viewed. Omit it when unknown. The widget maps WoW #1 to `WoW10.mp3` and Twitch #1 to `Twitch5.mp3`.
+- `view_count`: Helix view count. The frame prints it with commas. Omit it when unknown.
 - `reward`: optional. Include the reward title if you want the widget's `?reward=` filter to apply.
 
 ## NEW (required): static widget route

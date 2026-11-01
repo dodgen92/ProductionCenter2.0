@@ -16,7 +16,7 @@ Widgets on this PC (the Fact Gnome, the translator, the orc, end credits) read o
 | **Add Camera Filter** | Applies a random camera filter (via AutoHotkey hotkeys), then clears it after 3 minutes. |
 | **Rip a Vintage Pokémon Card** | Pulls a random Gen 1 card the viewer hasn't caught yet, slides it across the screen with an eased OBS animation, and shows their progress toward all 151. Each viewer's collection is saved. |
 | **Start** / **Stop** | Starts or stops an auto-clipping loop that creates Twitch clips on a timer and posts each one to a Discord channel. |
-| **Play a Clip** | Plays a random mp4 from the local clip library (top World of Warcraft clips plus a few of the most-viewed clips on Twitch, downloaded when the server starts) and a random file from `voice_lines/orc/`. The orc widget gets a `clip` event. If the library is empty, it falls back to a Twitch embed. The title match ignores case. Rename it with `CLIP_REWARD_TITLE` if you want. |
+| **Play a Clip** | Plays a random mp4 from the local clip library (top 10 World of Warcraft clips plus the top 5 clips across Twitch, downloaded when the server starts). The orc speaks the recorded line for that clip's place in the list (WoW #1, Twitch #3, and so on). `voice_lines/orc/` is only used when a clip has no matching line. The orc widget gets a `clip` event. If the library is empty, it falls back to a Twitch embed of a top WoW clip and still sends that clip's place in the list. The title match ignores case. Rename it with `CLIP_REWARD_TITLE` if you want. |
 | **Translate to English** / **Translate from English** | Not handled inside the reward `if` chain. Every redemption is published on `/events` (including the viewer's text). The translator widget sees those and calls `/translate` and `/tts`. Create both rewards with "Require viewer to enter text" turned on. |
 
 Follows, subs, resubs, gifted subs, and cheers are published on the same feed and collected for the end-credits roll.
@@ -64,7 +64,7 @@ Pokemon/pokerip.py     Pokémon card pull logic + OBS animation
 pokemon_catches.json   Saved per-viewer collections
 credits.html           End-credits page for an OBS browser source
 banned_words.txt       Optional whole-word filter (empty = off)
-voice_lines/orc/       Drop recorded mp3/wav lines here
+voice_lines/orc/       Fallback orc lines when a clip has no rank. Ranked lines live in widgets/orc-clip/audio/
 CameraFilters/         Random filter picker, clear script, AutoHotkey filter hotkeys
 sheetripper.py         Utility: cut card sheets into single card images
 unsubscribe.py         Utility: remove EventSub subscriptions (WebSocket or old webhook)
@@ -116,7 +116,7 @@ Play a Clip does **not** use that user token. It uses an app token from `clips.p
 5. `TWITCH_OAUTH_TOKEN` must be a **user** token for your channel with all four scopes above. An app token will not create the WebSocket subscriptions. A token that only has `channel:read:redemptions` will keep redemptions working and Twitch will reject the other subscriptions (the server prints the error and keeps going).
 6. Leave `EVENTSUB_WS_URL` blank for real Twitch. Set it only when you point the client at the Twitch CLI mock (see below).
 7. Create the channel point rewards in the Creator Dashboard (table above). Titles for the old rewards must match exactly. **Play a Clip** ignores case.
-8. Drop at least one `.mp3` or `.wav` in `voice_lines/orc/` if you want the orc to talk. With zero files the clip event is still published and `voice_line` is empty. The clip event also includes `reward` (the channel-point title) so a widget can filter on `?reward=`.
+8. Ranked orc lines ship in `widgets/orc-clip/audio/` (`lines.js` holds the words and timing). `voice_lines/orc/` is only the fallback for a clip with no rank. With zero fallback files the clip event is still published and `voice_line` is empty. The clip event also includes `reward` (the channel-point title) so a widget can filter on `?reward=`.
 9. Widgets now live in the `widgets/` folder in this repo. Delete `WIDGETS_DIR` from `.env`, or leave it blank, to serve those. Keep the old line only if you still want the Desktop folder (`C:\Users\tyler\Desktop\Stream-Widgets`) instead.
 10. Run `pip install -r requirements.txt` again so `yt-dlp` is installed. Play a Clip uses it to save mp4 files. Optional: `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` for `/tts?engine=eleven`. Optional: `DEEPL_API_KEY` as the last translation fallback. Optional: add lines to `banned_words.txt`.
 

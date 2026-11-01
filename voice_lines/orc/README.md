@@ -2,7 +2,7 @@
 
 Drop your recorded `.mp3` or `.wav` files in this folder.
 
-When someone redeems **Play a Clip**, the server picks one file at random and puts its path on the clip event as `voice_line` (for example `/voice_lines/orc/hello.mp3`). The orc widget loads that from `http://localhost:5000`.
+When someone redeems **Play a Clip**, the orc widget first tries the ranked line in `widgets/orc-clip/audio/` (see `lines.js`). This folder is the fallback for a clip that has no matching line. The server picks one file at random and puts its path on the clip event as `voice_line` (for example `/voice_lines/orc/hello.mp3`). The orc widget loads that from `http://localhost:5000`.
 
 If this folder has two or more audio files, the same line will not play twice in a row.
 

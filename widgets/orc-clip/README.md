@@ -1,6 +1,6 @@
 # Orc Clip Presenter
 
-"Play a Clip" channel point reward: the orc scholar pops in, plays one of Tyler's recorded voice lines, then a Twitch clip plays in a gold WoW-style frame (title, "clipped by", "redeemed by"), then everything hides. Redemptions queue and play one after another.
+"Play a Clip" channel point reward: the orc scholar pops in, plays the recorded line for that clip's rank, then a Twitch clip plays in a gold WoW-style frame (title, rank, view count, "clipped by", "redeemed by"), then everything hides. Redemptions queue and play one after another.
 
 ## IMPORTANT: load it over http://localhost, not file://
 Twitch clip embeds only play inside a page whose hostname matches `parent=`. Twitch enforces this with a CSP header (`frame-ancestors http://localhost:* https://localhost:*` when parent=localhost).
@@ -23,20 +23,33 @@ Use the word `localhost` in the URL, not 127.0.0.1. Otherwise set `&parent=127.0
 | maxdur | 60 | cap in seconds on how long a clip is shown |
 | buffer | 5 | seconds added to `duration` for the embed to load and start |
 | scale | 1 | scale the whole layout |
-| test | | `1` = fake events (voice line `test/voice-test.mp3` plus a real public clip). `&once=1` plays one. `&clip=SLUG` uses your own clip |
+| test | | `1` = the old fake cycle (voice line `test/voice-test.mp3` plus a real public clip). `wow` or `twitch` previews one rank, for example `?test=wow&rank=3` or `?test=twitch&rank=1` (local test clip, 12,345 views). `&once=1` plays one. `&clip=SLUG` uses your own clip with `test=1` |
 
 ## Behaviour
-- Voice line finishes (or a 20 s cap passes) before the clip iframe is even created, so the two never overlap.
+- A ranked line (see Voice lines) holds the clip on its first frame, or on the thumbnail if the file is not ready. A film countdown inside the clip window runs for that line's `voice_end_s` and hits 0 when the orc stops talking. Then the clip starts. The music tail fades out quickly so it does not sit on the clip audio. If the mp3 ends first, the clip starts then.
+- A clip with no matching line still waits until `voice_line` finishes (or a 20 s cap), then plays. That is the old path.
 - No voice line: the orc shows for about 1.4 s, then the clip plays.
 - No clip: the orc says "No clips in the vault yet" (with his voice line if there is one) and leaves.
 - Clip end: Twitch's clip embed has no JS API or postMessage events (checked: zero messages from the iframe). So the widget uses `duration + buffer` (capped by maxdur), with a gold progress bar under the clip.
-- Layout rule: nothing may overlap the clip iframe, not even a drop-shadow, and no ancestor may be hidden or scaled when it loads. Otherwise Twitch logs "Autoplay disabled ... style visibility" and the clip sits paused. The frame is shown first and the iframe is loaded 750 ms later.
+- Layout rule: nothing may overlap the clip iframe, not even a drop-shadow, and no ancestor may be hidden or scaled when it loads. Otherwise Twitch logs "Autoplay disabled ... style visibility" and the clip sits paused. The countdown is removed before the iframe is created. On the old path the frame is shown first and the iframe is loaded 750 ms later. On a ranked line the frame has already been up for the whole voice, so the iframe loads once the countdown is gone.
 
 ## Voice lines
-Drop mp3s in the Production Center's `voice_lines/orc/`. The backend picks one at random (never the same twice in a row) and sends `voice_line` as `/voice_lines/orc/<file>`, a full URL, or a bare filename. All three work.
+The ranked takes live in `audio/`, with the words and timing in `lines.js`. Edit `text` in Notepad. Leave `file` matched to the mp3. Save, then refresh the browser source. Keep the line in double quotes, and use `'` inside a line rather than `"`.
+
+| Clip | Files | Which line plays |
+|---|---|---|
+| Top 10 World of Warcraft clips | `WoW1.mp3` … `WoW10.mp3` | WoW #1 plays `WoW10.mp3`. WoW #10 plays `WoW1.mp3`. |
+| Top 5 clips across Twitch | `Twitch1.mp3` … `Twitch5.mp3` | Twitch #1 plays `Twitch5.mp3`. Twitch #5 plays `Twitch1.mp3`. |
+
+The server sends `source` (`wow` or `twitch`) and `rank` (1 is the most viewed in that list). The widget looks those up in `lines.js`. `voice_start_s` and `voice_end_s` are seconds from the start of the file: the music starts, then the orc talks, then the music fades. The countdown length is `voice_end_s`.
+
+If the rank has no line (11th WoW clip, a missing file, or an older library row with no rank), the widget uses `voice_line` from the server instead. That is still a random file from `voice_lines/orc/`, sent as `/voice_lines/orc/<file>`, a full URL, or a bare filename. With no file there either, he stands quietly, then the clip plays.
 
 ## Files
-index.html, style.css, orc.js, art/orc.png (cut out from the approved orc scholar with tools/cutout.py), test/voice-test.mp3 (test only), tools/ (cutout, mock server, headless tests).
+index.html, style.css, orc.js, lines.js, audio/ (the ranked mp3s), art/orc.png (cut out from the approved orc scholar with tools/cutout.py), test/voice-test.mp3 (test only), tools/ (cutout, mock server, headless tests).
+
+## Music
+Music: 'Clarion' by Scott Buckley (CC BY 4.0)
 
 ## Clip channel name
 The header shows "CHANNEL: Title" (event field `broadcaster_name`, fallback `broadcaster`); just the title if missing. Long titles shrink, then ellipsize.

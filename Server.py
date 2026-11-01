@@ -420,13 +420,19 @@ def fetch_random_clip():
     """One random clip from the recent top WoW list, using the app token in clips.py.
 
     This is the fallback when clips_cache has nothing to play yet.
+    Helix lists the most-viewed clip first. That place is the WoW rank.
     """
 
     token = clips.get_app_token()
     found = clips.get_top_wow_clips(token)
     if not found:
         return None
-    return random.choice(found)
+    # Helix returns the most-viewed clip first, so place 0 is WoW #1.
+    index = random.randrange(len(found))
+    clip = dict(found[index])
+    clip["source"] = "wow"
+    clip["rank"] = index + 1
+    return clip
 
 
 def clip_event_fields(clip):
@@ -444,7 +450,7 @@ def clip_event_fields(clip):
     duration = clip.get("duration")
     if duration is None:
         duration = 0
-    return {
+    fields = {
         "clip_id": clip.get("clip_id") or clip.get("id") or "",
         "clip_url": clip.get("url") or clip.get("clip_url") or "",
         "embed_url": clip.get("embed_url") or "",
@@ -455,6 +461,20 @@ def clip_event_fields(clip):
         "thumbnail_url": clip.get("thumbnail_url") or "",
         "video_url": video_url,
     }
+    # Rank and views are optional. An older index, or an empty clip, leaves
+    # them off so the widget falls back to a plain voice line.
+    if "view_count" in clip:
+        try:
+            fields["view_count"] = int(clip.get("view_count") or 0)
+        except (TypeError, ValueError):
+            fields["view_count"] = 0
+    source = clips.clip_source(clip)
+    rank = clips.clip_rank(clip)
+    if source:
+        fields["source"] = source
+    if rank:
+        fields["rank"] = rank
+    return fields
 
 
 def play_clip_for(user, login, reward=""):
@@ -471,6 +491,9 @@ def play_clip_for(user, login, reward=""):
             print("[Server] WARNING: no clip available. Publishing empty clip fields.")
             clip = {}
 
+    # The widget plays the ranked mp3 in widgets/orc-clip/audio/ when source
+    # and rank match a line. voice_line is only the fallback (no rank, or the
+    # ranked file failed to load).
     voice_line = pick_voice_line("orc")
     if not voice_line:
         print("[Server] WARNING: no voice lines in voice_lines/orc/. Publishing an empty voice_line.")
