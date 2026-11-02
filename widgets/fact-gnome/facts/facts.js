@@ -7,7 +7,7 @@
 // Facts are shuffled and never repeat until every fact has been used.
 window.GNOME_FACTS = [
 "WoW shipped with only about sixty five developers, says level designer John Staats. He joined when the team was twenty. Sixty five people built a whole planet. Gnomes built Gnomeregan with fewer, but we don't talk about how that went.",
-"World of Warcraft started back in 1999, five years before launch. Five years! Some of you can't finish a quest chain in five days.",
+"World of Warcraft started back in 1999, five years before launch. Five years! Some of you can't even finish a quest chain in five years.",
 "Blizzard wildly underestimated WoW. Most of the team guessed about a quarter million subscribers, and one million was the boldest dream. It hit twelve million. Math is hard. Not for gnomes, but for them.",
 "At launch Blizzard could only ship about half a million copies in North America because the servers couldn't take more. They sold out in days. Queues were born. Sorry, everyone.",
 "Early on, WoW shared engine technology with Warcraft Three. Same family tree, different branch. Like a gnome and a slightly taller gnome.",
@@ -30,4 +30,5 @@ window.GNOME_FACTS = [
 "Molten Core's world first Ragnaros kill came on April twenty fifth, 2005, after one hundred fifty four days undefeated. Too soon? More like way too late.",
 "When Blizzard staff first tested Molten Core, forty developers ignored instructions in chat and made choo-choo train noises. The people who made the game couldn't raid it. Relatable!",
 "The Blood Knights got their Light by draining a captured naaru named M'uru under Silvermoon. Forcing a holy being to power your paladins? Bold. Gnomes just use batteries.",
+"Shade of Aran's Flame Wreath was bugged! Anyone crossing a ring blew up the raid, says designer Alexander Brazie. His lead wouldn't let him fix it, so players just learned: don't move. A bug became a mechanic. Gnome engineers call that a feature.",
 ];

@@ -194,6 +194,10 @@ def test_refresh_writes_an_index_and_skips_a_failed_download(monkeypatch, capsys
     global_b = helix_clip("GlobalB", 700, title="Another")
     fail_clip = helix_clip("FailClip", 800, title="Broken download")
 
+    # clips.py asks Helix with APP_CLIENT_ID. TWITCH_CLIENT_ID is the user
+    # token for EventSub, and this test must not depend on that name.
+    monkeypatch.setenv("APP_CLIENT_ID", "test-app-client-id")
+
     def fake_post(url, params=None, timeout=None, **kwargs):
         assert url == "https://id.twitch.tv/oauth2/token"
         assert (params or {}).get("grant_type") == "client_credentials"
@@ -201,7 +205,7 @@ def test_refresh_writes_an_index_and_skips_a_failed_download(monkeypatch, capsys
 
     def fake_get(url, headers=None, params=None, timeout=None):
         assert headers["Authorization"] == "Bearer app-token"
-        assert headers["Client-ID"] == "test-client-id"
+        assert headers["Client-ID"] == "test-app-client-id"
         params = params or {}
         if url.endswith("/games/top"):
             return JsonResponse({"data": [
