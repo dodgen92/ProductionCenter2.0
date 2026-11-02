@@ -21,8 +21,9 @@ html,body{margin:0;background:transparent;width:1920px;height:1080px;overflow:hi
    countdown is gone and he is leaving before that iframe is created. */
 /* ?side=right moves the orc to the right. The frame stays on --frame-left
    so the default size does not jump onto the webcam (cam ≈ x1240-1880). */
-#frame{position:absolute;top:var(--frame-top);left:var(--frame-left);width:var(--frame-width);height:var(--frame-height);box-sizing:border-box;display:flex;flex-direction:column;opacity:0;transform:translateY(-40px) scale(.92)}
-#orcbox{position:absolute;left:10px;bottom:0;width:440px;height:820px}
+#frame{position:absolute;top:var(--frame-top);left:var(--frame-left);width:var(--frame-width);height:var(--frame-height);box-sizing:border-box;display:flex;flex-direction:column;opacity:0;transform:translateY(-40px) scale(.92);z-index:1}
+/* Above the frame. isolation keeps the <video> compositor layer from covering him. */
+#orcbox{position:absolute;left:10px;bottom:0;width:440px;height:820px;z-index:10;isolation:isolate;will-change:transform}
 .right #orcbox{left:820px}
 /* WoW-style frame: dark leather + gold trim */
 #frame{background:linear-gradient(#2b1e12,#1a110a);border:3px solid #3a3020;border-radius:10px;box-shadow:0 0 0 2px #c9a227 inset,0 0 0 5px #3a3020 inset,0 10px 30px rgba(0,0,0,.6);padding:10px}

@@ -11,7 +11,9 @@ const SERVER=(g('server')||'http://localhost:5000').replace(/\/+$/,''),USE_SERVE
 const REWARD=(g('reward')||'Play a Clip').trim().toLowerCase();
 const VVOL=Math.min(1,Math.max(0,g('vvol')==null?0.9:+g('vvol')));
 const MUTED=g('muted')==='1';
-const CVOL=Math.min(1,Math.max(0,g('cvol')==null?1:+g('cvol')));
+// Clip <video> volume, 0 to 1. Change 0.8 to taste. ?cvol= overrides it.
+// The voice line is VVOL, not this. The Twitch iframe has no volume setting.
+const CVOL=Math.min(1,Math.max(0,g('cvol')==null?0.8:+g('cvol')));
 const MAXDUR=Math.max(5,+(g('maxdur')||60));
 const BUFFER=Math.max(0,+(g('buffer')||5)); // seconds added for the embed to load + start (measured ~5-7s in headless Chrome)
 // parent= must match the page's hostname. Over http(s) use our own hostname; from file:// fall back to localhost (see README).
