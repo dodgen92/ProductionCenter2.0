@@ -281,7 +281,7 @@ curl "http://localhost:5000/counsel?q=tank%20or%20healer&user=test"
 
 ### 11. Fact Gnome pre-recorded voice
 
-The Fact Gnome plays a Kokoro wav from `widgets/fact-gnome/voice/` when that fact is in `voice/voices.js`. If the line is missing, it falls back to live `/tts`, then the browser voice. `?prerec=0` skips the recordings. Those wavs and `voices.js` stay on this PC (they are gitignored). Kokoro is not part of the server install.
+The Fact Gnome plays a file from `widgets/fact-gnome/voice/` when that fact's exact text is a key in `voice/voices.js`. The repo includes Ed's Kokoro mp3s (`gnome_01.mp3` through `gnome_25.mp3`) and that manifest. If the line is missing, it falls back to live `/tts`, then the browser voice. `?prerec=0` skips the recordings. `make_gnome_voices.py` still writes wavs into that folder and replaces `voices.js`; those generated wavs stay on this PC (gitignored). Kokoro is not part of the server install.
 
 Use a separate Python 3.12 venv so Kokoro's torch stays out of the server environment. In PowerShell, from the project folder:
 
@@ -304,7 +304,7 @@ python widgets\fact-gnome\tools\make_gnome_voices.py --voice af_nicole --ghoul
 
 `widgets/fact-gnome/facts/spoken.js` is optional. The bubble still shows the plain fact from `facts.js`. If that exact text is a key in `spoken.js`, Kokoro says the value instead. The value can use Kokoro markup: `[Staats](/stˈæts/)` for a pronunciation, `[them](+1)` for stress, and `…` `—` `;` for pauses. `voices.js` stays keyed by the plain fact. A fact with no spoken line is read as written, and its file name stays the same as before. The spoken.js in the repo already has a line for every current fact, so the next run rebuilds every wav and removes the old files.
 
-In OBS, refresh the Fact Gnome browser source. Rerun the script when `facts.js` or `spoken.js` changes, or when you change `--pitch` or `--ghoul`. Lines that already exist for the same settings are skipped, and audio for a deleted fact is removed.
+In OBS, refresh the Fact Gnome browser source. Rerun the script when `facts.js` or `spoken.js` changes, or when you change `--pitch` or `--ghoul`. Lines that already exist for the same settings are skipped, and audio for a deleted fact is removed. A rerun replaces the shipped `voices.js` (the `gnome_0N.mp3` map). Copy that file aside first if you still want those recordings. The widget README has the short version of how to swap one line.
 
 ## 🧪 Tests
 
