@@ -29,6 +29,7 @@ Use the word `localhost` in the URL, not 127.0.0.1. Otherwise set `&parent=127.0
 | test | | `1` = the old fake cycle (voice line `test/voice-test.mp3` plus a real public clip). `wow` or `twitch` previews one rank, for example `?test=wow&rank=3` or `?test=twitch&rank=1` (local test clip, 12,345 views). `&once=1` plays one. `&clip=SLUG` uses your own clip with `test=1` |
 
 ## Behaviour
+- The server picks the clip from a shuffle bag (`clips_cache/shuffle.json`), one whole library, not separate WoW and Twitch bags. Nothing repeats until every downloaded file has played. A new download joins the current round. Delete `shuffle.json` to start over. `?test=` and `?rank=` are previews and do not use the bag.
 - A ranked line (see Voice lines) holds the clip on its first frame, or on the thumbnail if the file is not ready. A film countdown inside the clip window runs for that line's `voice_end_s` and hits 0 when the orc stops talking. Then the clip starts and the orc slides off toward the side he is standing on (`side=left` goes left and down, `side=right` goes right and down). The next clip walks him back in. The music tail fades out quickly so it does not sit on the clip audio. If the mp3 ends first, the clip starts then.
 - A clip with no matching line still waits until `voice_line` finishes (or a 20 s cap), then plays. That is the old path.
 - No voice line: the orc shows for about 1.4 s, then the clip plays.

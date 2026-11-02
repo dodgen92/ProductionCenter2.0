@@ -20,11 +20,42 @@ if(g('scale'))stage.style.setProperty('--scale',g('scale'));
 const base=stage.className;
 const FACTS=(window.GNOME_FACTS||window.FACTS||[]).filter(f=>typeof f==='string'&&f.trim());
 if(!FACTS.length)FACTS.push('My fact list is empty! Add some facts to facts/facts.js.');
-// no-repeat shuffle: every fact plays once before any repeats (and no back-to-back across decks)
-let deck=[],last='';
-function next(){if(!deck.length){deck=[...FACTS];for(let i=deck.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[deck[i],deck[j]]=[deck[j],deck[i]];}
-  if(deck.length>1&&deck[deck.length-1]===last)[deck[0],deck[deck.length-1]]=[deck[deck.length-1],deck[0]];}
-  return last=deck.pop();}
+// Shuffle bag. deck is what is left this round. pool is every fact in the round,
+// so a new line in facts.js can join without treating already-played lines as new.
+// OBS keeps this across a source refresh. ?test=1 does not touch it.
+// Reset: open the page with ?resetdeck=1, or clear localStorage key gnome_deck_v1.
+const DECK_KEY='gnome_deck_v1';
+let deck=[],last='',pool=[];
+function shuffle(list){for(let i=list.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));const t=list[i];list[i]=list[j];list[j]=t;}return list;}
+function saveBag(){try{localStorage.setItem(DECK_KEY,JSON.stringify({deck:deck,last:last,pool:pool}));}catch(e){}}
+function loadBag(){
+  if(g('resetdeck')==='1'){try{localStorage.removeItem(DECK_KEY);}catch(e){}deck=[];last='';pool=[];return;}
+  let saved=null;
+  try{saved=JSON.parse(localStorage.getItem(DECK_KEY)||'null');}catch(e){saved=null;}
+  const have=new Set(FACTS);
+  if(!saved||typeof saved!=='object'){deck=[];last='';pool=[];return;}
+  pool=(Array.isArray(saved.pool)?saved.pool:[]).filter(f=>have.has(f));
+  const inPool=new Set(pool);
+  deck=(Array.isArray(saved.deck)?saved.deck:[]).filter(f=>inPool.has(f));
+  const extra=shuffle(FACTS.filter(f=>!inPool.has(f)));
+  // Leftover facts stay next up. New facts wait behind them.
+  if(deck.length){deck=extra.concat(deck);pool=pool.concat(extra);}
+  else{deck=[];pool=[];}
+  last=typeof saved.last==='string'?saved.last:'';
+}
+function next(){
+  if(TEST)return FACTS[Math.floor(Math.random()*FACTS.length)];
+  if(!deck.length){
+    deck=shuffle(FACTS.slice());
+    // The end of the list is the next fact. Don't open a round with the one we just said.
+    if(deck.length>1&&deck[deck.length-1]===last){const t=deck[0];deck[0]=deck[deck.length-1];deck[deck.length-1]=t;}
+    pool=FACTS.slice();
+  }
+  last=deck.pop();
+  saveBag();
+  return last;
+}
+loadBag();
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const set=(...c)=>{stage.className=[base,...c].join(' ');};
 

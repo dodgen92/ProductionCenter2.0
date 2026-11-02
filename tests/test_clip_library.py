@@ -616,3 +616,126 @@ def test_clip_event_skips_rank_when_the_row_has_none():
     assert fields["title"] == "Old row"
     assert "source" not in fields
     assert "rank" not in fields
+
+
+def keep_order(items):
+    """Stand-in for random.shuffle that leaves the list as it was."""
+
+
+def test_clip_bag_plays_every_file_once_before_a_repeat(monkeypatch):
+    """Three clips come out as three different files. The next round does not start with the last one."""
+
+    # Proves: a round covers the whole library, and the reshuffle does not
+    # hand back the clip that closed the previous round.
+
+    monkeypatch.setattr(Server.random, "shuffle", keep_order)
+    entries = [{"file": "a.mp4"}, {"file": "b.mp4"}, {"file": "c.mp4"}]
+    state = Server._empty_shuffle()
+    played = []
+    for _ in range(3):
+        pick, state = Server.next_from_bag(entries, state)
+        played.append(pick["file"])
+
+    assert played == ["c.mp4", "b.mp4", "a.mp4"]
+    assert len(set(played)) == 3
+
+    # Act: the round is empty, so this is the first clip of the next round.
+    again, state = Server.next_from_bag(entries, state)
+
+    # Assert: last clip was a.mp4, so the new round must not open with it.
+    assert again["file"] != "a.mp4"
+    assert again["file"] == "c.mp4"
+    assert state["last"] == "c.mp4"
+
+    # The shuffled list would have opened on a.mp4, which just played.
+    # The bag swaps that with the other end so the new round starts somewhere else.
+    forced = [{"file": "b.mp4"}, {"file": "a.mp4"}]
+    parked = {"deck": [], "last": "a.mp4", "pool": ["b.mp4", "a.mp4"]}
+    opened, _state = Server.next_from_bag(forced, parked)
+    assert opened["file"] == "b.mp4"
+
+
+def test_clip_bag_adds_a_new_file_and_drops_a_deleted_one(monkeypatch):
+    """A download joins the round already in progress. A missing file is not drawn."""
+
+    monkeypatch.setattr(Server.random, "shuffle", keep_order)
+    entries = [{"file": "a.mp4"}, {"file": "b.mp4"}, {"file": "c.mp4"}]
+    pick, state = Server.next_from_bag(entries, Server._empty_shuffle())
+    assert pick["file"] == "c.mp4"
+
+    # Act: d.mp4 arrived. c.mp4 already played, so it stays out until the reshuffle.
+    grown = entries + [{"file": "d.mp4"}]
+    rest = []
+    for _ in range(3):
+        pick, state = Server.next_from_bag(grown, state)
+        rest.append(pick["file"])
+
+    assert rest == ["b.mp4", "a.mp4", "d.mp4"]
+
+    # Act: b.mp4 is gone. Only a and c are left, and the saved deck still names b.
+    state = {"deck": ["a.mp4", "b.mp4", "c.mp4"], "last": "", "pool": ["a.mp4", "b.mp4", "c.mp4"]}
+    left = [{"file": "a.mp4"}, {"file": "c.mp4"}]
+    first, state = Server.next_from_bag(left, state)
+    second, state = Server.next_from_bag(left, state)
+
+    assert first["file"] == "c.mp4"
+    assert second["file"] == "a.mp4"
+    assert "b.mp4" not in state["deck"]
+    assert "b.mp4" not in state["pool"]
+
+
+def test_pick_local_clip_saves_the_bag_and_skips_a_repeat(monkeypatch):
+    """The bag is clips_cache/shuffle.json. The next redeem does not repeat the file just played."""
+
+    folder = Server.CLIPS_DIR
+    folder.mkdir()
+    rows = []
+    for name in ("a.mp4", "b.mp4"):
+        (folder / name).write_bytes(b"not really a video")
+        rows.append({
+            "file": name,
+            "clip_id": name[:-4],
+            "url": "https://clips.twitch.tv/" + name,
+            "embed_url": "",
+            "title": name,
+            "broadcaster_name": "Durotan_Live",
+            "creator": "Peonwork",
+            "duration": 4,
+            "view_count": 3,
+            "source": "wow",
+            "rank": 1,
+            "thumbnail_url": "",
+        })
+    (folder / "index.json").write_text(json.dumps(rows), encoding="utf-8")
+    monkeypatch.setattr(Server.random, "shuffle", keep_order)
+
+    # Act
+    first = Server.pick_local_clip()
+    second = Server.pick_local_clip()
+    third = Server.pick_local_clip()
+
+    # Assert
+    assert first["file"] == "b.mp4"
+    assert second["file"] == "a.mp4"
+    assert third["file"] != second["file"]
+    saved = json.loads((folder / "shuffle.json").read_text(encoding="utf-8"))
+    assert saved["last"] == third["file"]
+    assert isinstance(saved["deck"], list)
+
+
+def test_clear_clip_cache_keeps_the_shuffle_bag():
+    """Startup deletes old mp4s and leaves shuffle.json, so the round can continue."""
+
+    folder = Server.CLIPS_DIR
+    folder.mkdir()
+    (folder / "old.mp4").write_bytes(b"old")
+    (folder / "shuffle.json").write_text("{}\n", encoding="utf-8")
+    (folder / ".gitkeep").write_text("", encoding="utf-8")
+
+    # Act
+    Server.clear_clip_cache()
+
+    # Assert
+    assert (folder / "shuffle.json").is_file()
+    assert (folder / ".gitkeep").is_file()
+    assert not (folder / "old.mp4").is_file()
