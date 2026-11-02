@@ -76,16 +76,16 @@ def test_voice_lines_match_the_audio_files():
     assert len(listed) == len(set(listed))
 
 
-def test_voice_line_still_starts_the_background_bed():
-    """A voice line must not skip the mp3 in sounds/. That bed plays under the voice."""
+def test_voice_line_plays_alone():
+    """A voice line is the whole alert. sounds/ plays only when there is no line."""
 
-    # Proves: the recorded line and the older bed both start. Follows stay
-    # without the bed, and the bed is a fraction of the voice volume.
+    # Proves: the music is inside the mp3 in audio/. The widget does not
+    # start a second file under it. A follow with no line stays silent.
 
     text = PALADIN_JS.read_text(encoding="utf-8")
     assert "if(line)voice=playVoice(line);" in text
-    assert "if(!fol)playSound(!!line);" in text
-    assert "const BED=0.35;" in text
+    assert "else if(!fol)playSound();" in text
+    assert "BED" not in text
 
 
 def test_widgets_route_serves_a_paladin_line(client, monkeypatch):

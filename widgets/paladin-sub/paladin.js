@@ -22,33 +22,19 @@ const set=(...c)=>{stage.className=[base,...c].filter(Boolean).join(' ');};
 const clean=s=>String(s||'').replace(/[\u0000-\u001f\u007f<>&"'`]/g,'').trim().slice(0,25)||'friend';
 
 
-// ---- sounds: mp3 from sounds/ under the voice line ----
-// The recorded line used to replace this bed, so playSound never ran once a
-// line existed. Play both. The bed stays quieter so the words stay clear.
-// Follows do not play the bed. They never did.
+// ---- sounds: fallback mp3 from sounds/ when this alert has no voice line ----
 const SOUND_ON=g('sound')!=='0',VOL=Math.min(1,Math.max(0,g('vol')==null?0.8:+g('vol')));
-const BED=0.35;
 let sounds=(Array.isArray(window.PALADIN_SOUNDS)?window.PALADIN_SOUNDS:[]).map(f=>String(f).trim()).filter(Boolean).map(f=>'sounds/'+encodeURI(f));
-// A listed file is ready now. Numbered files (1.mp3, 2.mp3, ...) are found
-// after the page loads, so an alert that fires immediately waits for that.
-let soundsReady=sounds.length>0;
 if(SOUND_ON&&!sounds.length){const found=[];let pending=50;
   for(let n=1;n<=50;n++){const a=new Audio();a.preload='metadata';
     a.oncanplaythrough=a.onloadedmetadata=()=>{if(!a._ok){a._ok=1;found.push({n,src:a.src});}if(!--pending)done();};
     a.onerror=()=>{if(!--pending)done();};a.src='sounds/'+n+'.mp3';}
-  function done(){found.sort((x,y)=>x.n-y.n);sounds=found.map(f=>f.src);soundsReady=true;}}
-let lastSnd=-1,bed=null,bedGen=0;
-function playSound(underVoice,gen){if(!SOUND_ON)return;
-  if(gen==null)gen=bedGen;
-  if(gen!==bedGen)return; // this alert already finished
-  if(!soundsReady){setTimeout(()=>playSound(underVoice,gen),250);return;}
-  if(!sounds.length)return;
-  if(bed){try{bed.pause();}catch(e){}}
+  function done(){found.sort((x,y)=>x.n-y.n);sounds=found.map(f=>f.src);}}
+let lastSnd=-1;
+function playSound(){if(!SOUND_ON||!sounds.length)return;
   let i=Math.floor(Math.random()*sounds.length);if(sounds.length>1&&i===lastSnd)i=(i+1)%sounds.length;lastSnd=i;
-  const a=new Audio(sounds[i]);bed=a;
-  a.volume=underVoice?Math.min(1,VOL*BED):VOL;
-  a.play().catch(e=>console.warn('paladin sound',e));
-  if(window.paladinSub){window.paladinSub.lastBed=sounds[i];if(!underVoice)window.paladinSub.lastSound=sounds[i];}}
+  const a=new Audio(sounds[i]);a.volume=VOL;a.play().catch(e=>console.warn('paladin sound',e));
+  window.paladinSub&&(window.paladinSub.lastSound=sounds[i]);}
 
 // ---- voice lines (lines.js): one recorded take per alert ----
 // dono = sub, resub, gift, bits. follow = follows. raid = raids.
@@ -125,10 +111,10 @@ async function run(){
     subEl.textContent=fol?'':raid?`${ev.count} raiders!`:ev.type==='resub'&&ev.months>1?`${ev.months} months!`:'';
     msg.textContent='';
     if(lineEl)lineEl.textContent=line?line.text:'';
-    // Voice and the bed together. A follow stays without the bed.
+    // A voice line replaces the old random mp3. Follows with no line stay silent.
     let voice=Promise.resolve();
     if(line)voice=playVoice(line);
-    if(!fol)playSound(!!line);
+    else if(!fol)playSound();
     set('in','flare');await wait(fol?600:1000);
     set('in','show','talking');await wait(fol?150:350);
     const t0=Date.now();
@@ -136,8 +122,6 @@ async function run(){
     const minLeft=Math.max(1200,D-(fol?750:1350)-(Date.now()-t0)-(fol?800:1100));
     // Stay up until the spoken line ends, and at least as long as the old timer.
     await Promise.all([voice,wait(minLeft)]);
-    bedGen++;
-    if(bed){try{bed.pause();}catch(e){}bed=null;}
     set('in','show');
     await wait(200);
     set('out');await wait(850);set();
