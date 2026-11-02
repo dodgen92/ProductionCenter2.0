@@ -67,3 +67,34 @@ html,body{margin:0;background:transparent;width:1920px;height:1080px;overflow:hi
 @keyframes ember{0%{opacity:0;transform:translate(0,8px) scale(.6)}15%{opacity:1}100%{opacity:0;transform:translate(var(--x),-100px) scale(1.1)}}
 .in:not(.talking) #sway{animation:idle2 3.2s ease-in-out infinite}
 @keyframes idle2{0%,100%{transform:translateY(0) rotate(0)}25%{transform:translateY(-3px) rotate(-.7deg) scale(1.004,1.01)}50%{transform:translateY(-5px) scale(1.01,1.018)}75%{transform:translateY(-3px) rotate(.7deg) scale(1.004,1.01)}}
+
+/* rank + views, same gold as the frame header */
+#stats{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:0 8px 6px;color:#e8d6ae;font-size:22px;font-weight:700;text-shadow:0 2px 0 #000}
+#stats[hidden]{display:none !important}
+#rank{color:#ffd77a}
+#views{margin-left:auto}
+.held #thumb{opacity:.85}
+.held #ph{display:none}
+
+/* Cinema leader. Sits inside the clip window while the orc talks, then goes away. */
+#leader{display:none;z-index:3;align-items:center;justify-content:center;pointer-events:none;
+ background:radial-gradient(circle at 50% 45%,rgba(0,0,0,.2),rgba(0,0,0,.78) 72%);overflow:hidden}
+.held #leader{display:flex;animation:flicker .18s steps(2,end) infinite}
+#leader:after{content:'';position:absolute;inset:-20%;pointer-events:none;opacity:.2;
+ background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+ animation:grain .16s steps(2,end) infinite}
+@keyframes grain{0%{transform:translate(0,0)}100%{transform:translate(-14px,10px)}}
+@keyframes flicker{0%,100%{filter:contrast(1) brightness(1)}45%{filter:contrast(1.08) brightness(.94)}70%{filter:contrast(.96) brightness(1.06)}}
+.clock{position:relative;width:248px;height:248px;border-radius:50%;border:10px solid #f4f0e6;
+ box-shadow:0 0 0 4px #1a140c,inset 0 0 0 3px #1a140c,0 0 24px rgba(0,0,0,.65);
+ background:radial-gradient(circle at 50% 45%,rgba(28,24,18,.35),rgba(0,0,0,.55) 70%)}
+.clock:before{content:'';position:absolute;inset:0;border-radius:50%;opacity:.8;background:
+ linear-gradient(#f4f0e6,#f4f0e6) 50% 8px/3px 18px no-repeat,
+ linear-gradient(#f4f0e6,#f4f0e6) 50% calc(100% - 8px)/3px 18px no-repeat,
+ linear-gradient(#f4f0e6,#f4f0e6) 8px 50%/18px 3px no-repeat,
+ linear-gradient(#f4f0e6,#f4f0e6) calc(100% - 8px) 50%/18px 3px no-repeat}
+#hand{position:absolute;left:50%;bottom:50%;width:4px;height:48%;margin-left:-2px;transform-origin:50% 100%;
+ background:linear-gradient(to top,transparent 0 36%,#f7f3ea 36%)}
+#count{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+ font-family:Impact,'Arial Black',sans-serif;font-size:112px;line-height:1;color:#f7f3ea;
+ text-shadow:0 3px 0 #000,0 0 12px rgba(0,0,0,.8)}

@@ -1,8 +1,12 @@
 (function(){
 'use strict';
-// Orc Clip Presenter. Data: Production Center GET /events (type:'clip'), voice lines from GET /voice_lines/orc/<file>. No secrets here.
+// Orc Clip Presenter. Data: Production Center GET /events (type:'clip').
+// A ranked clip plays the matching mp3 from audio/ (see lines.js).
+// Anything else still uses voice_line from the server (voice_lines/orc/). No secrets here.
 const P=new URLSearchParams(location.search),g=k=>P.get(k);
-const TEST=g('test')==='1',ONCE=g('once')==='1';
+const TESTKEY=(g('test')||'').toLowerCase();
+// test=1 is the old cycle. test=wow and test=twitch preview one rank.
+const TEST=TESTKEY==='1'||TESTKEY==='wow'||TESTKEY==='twitch',ONCE=g('once')==='1';
 const SERVER=(g('server')||'http://localhost:5000').replace(/\/+$/,''),USE_SERVER=g('server')!=='0';
 const REWARD=(g('reward')||'Play a Clip').trim().toLowerCase();
 const VVOL=Math.min(1,Math.max(0,g('vvol')==null?0.9:+g('vvol')));
@@ -59,11 +63,44 @@ function playVideo(src,evDur){return new Promise(res=>{const v=$('vid');let done
     if(e&&e.name==='NotAllowedError'){v.muted=true;v.play().catch(()=>fin('error'));}else fin('error');});
   });}
 function stopVideo(){const v=$('vid');try{v.pause();}catch(_){}v.removeAttribute('src');v.load();}
+// Load the mp4 and pause on the first frame. The clip stays held until the orc finishes.
+function holdVideo(src){return new Promise(res=>{const v=$('vid');let done=false;
+  const fin=ok=>{if(done)return;done=true;clearTimeout(timer);v.onloadeddata=v.onerror=null;res(ok);};
+  const timer=setTimeout(()=>fin(false),8000);
+  v.onerror=()=>{console.warn('orc clip hold failed',src);fin(false);};
+  v.onloadeddata=()=>{
+    // A muted play/pause is what actually paints frame 0. Always pause again,
+    // even if the play promise comes back late, so the clip cannot start early.
+    v.muted=true;let settled=false;
+    const snap=()=>{try{v.pause();}catch(e){}if(v.currentTime>0.05){try{v.currentTime=0;}catch(e){}}v.muted=MUTED;v.volume=CVOL;if(settled)return;settled=true;fin(true);};
+    const pr=v.play();setTimeout(snap,500);
+    if(pr&&pr.then)pr.then(snap).catch(snap);else snap();
+  };
+  v.volume=0;v.muted=true;v.preload='auto';v.src=src;
+});}
+// Same ending rules as playVideo, but the file is already loaded and paused.
+function startHeldVideo(evDur){return new Promise(res=>{const v=$('vid');let done=false,cap=0;const bar=$('bar').firstElementChild;
+  const fin=r=>{if(done)return;done=true;clearTimeout(cap);v.onended=v.onerror=null;res(r);};
+  v.onerror=()=>fin('error');
+  v.onended=()=>fin('ended');
+  const real=isFinite(v.duration)&&v.duration>0?v.duration:0;
+  const d=Math.min(MAXDUR,(+evDur>0?+evDur:real||30))+BUFFER;cap=setTimeout(()=>fin('timeout'),d*1000);
+  const bd=Math.min(MAXDUR,real||+evDur||30);bar.style.transition='none';bar.style.width='0';void bar.offsetWidth;bar.style.transition='width '+bd+'s linear';bar.style.width='100%';
+  v.muted=MUTED;v.volume=CVOL;
+  const pr=v.play();if(pr)pr.then(()=>{window.orcClip.vplay='ok';}).catch(e=>{window.orcClip.vplay=String(e.name||e);console.warn('orc clip play',e);
+    if(e&&e.name==='NotAllowedError'){v.muted=true;v.play().catch(()=>fin('error'));}else fin('error');});
+});}
 let actx=null;
 function sameOrigin(u){try{return new URL(u,location.href).origin===location.origin&&location.origin!=='null';}catch(e){return false;}}
-function playVoice(src){return new Promise(res=>{if(!src)return res(false);
-  const a=new Audio(src);a.volume=VVOL;let done=false,raf=0,lvl=0;const lip=$('lip');
-  const fin=ok=>{if(done)return;done=true;clearTimeout(t);cancelAnimationFrame(raf);lip.style.transform='';stage.classList.remove('lips');res(ok);};
+// Drop the music-bed tail quickly so it does not sit on top of the clip.
+function fadeTail(a){const from=a.volume;let step=0;const id=setInterval(()=>{step+=1;
+  try{a.volume=Math.max(0,from*(1-step/8));}catch(e){}
+  if(step>=8){clearInterval(id);try{a.pause();}catch(e){}}
+},40);}
+function playVoice(src,opts){opts=opts||{};return new Promise(res=>{if(!src)return res(false);
+  const a=new Audio(src);a.volume=VVOL;let done=false,raf=0,lvl=0,endTimer=0;const lip=$('lip');
+  const voiceEnd=+opts.voiceEnd;
+  const fin=ok=>{if(done)return;done=true;clearTimeout(t);clearTimeout(endTimer);cancelAnimationFrame(raf);lip.style.transform='';stage.classList.remove('lips');res(ok);};
   const t=setTimeout(()=>{try{a.pause();}catch(_){}fin(true);},20000); // hard cap on a voice line
   // audio-synced bounce: only when the mp3 is same-origin (served by the Production Center), else CSS sway
   let an=null,buf=null;
@@ -72,46 +109,173 @@ function playVoice(src){return new Promise(res=>{if(!src)return res(false);
   const frame=()=>{if(done)return;an.getByteTimeDomainData(buf);let s=0;for(let i=0;i<buf.length;i++){const v=(buf[i]-128)/128;s+=v*v;}
     const v=Math.min(1,Math.sqrt(s/buf.length)*6);lvl+=(v-lvl)*(v>lvl?.6:.25);window.orcClip.lip=(window.orcClip.lip||0)+1;
     lip.style.transform=`translateY(${-lvl*9}px) scale(${1+lvl*.025},${1+lvl*.02}) rotate(${Math.sin(a.currentTime*5)*lvl*1.5}deg)`;raf=requestAnimationFrame(frame);};
-  a.onended=()=>fin(true);a.onerror=()=>{console.warn('orc voice line failed',src);fin(false);};
-  a.play().then(()=>{if(an){stage.classList.add('lips');raf=requestAnimationFrame(frame);}}).catch(e=>{console.warn('orc voice play',e);fin(false);});
+  // 'ended' is the safety net: if the file stops before voice_end_s, start the clip anyway.
+  a.onended=()=>{stopCountdown();fin(true);};
+  a.onerror=()=>{console.warn('orc voice line failed',src);stopCountdown();fin(false);};
+  a.play().then(()=>{
+    window.orcClip.voiceAt=performance.now();
+    if(an){stage.classList.add('lips');raf=requestAnimationFrame(frame);}
+    if(!(voiceEnd>0))return;
+    const doneTalking=()=>{window.orcClip.voiceEndAt=performance.now();fadeTail(a);fin(true);};
+    if(opts.countdown)startCountdown(voiceEnd,doneTalking);
+    else endTimer=setTimeout(doneTalking,voiceEnd*1000);
+  }).catch(e=>{console.warn('orc voice play',e);stopCountdown();fin(false);});
   window.orcClip.lastVoice=src;});}
+
+// lines.js: one recorded take per rank. No match means use the server voice_line.
+function findLine(source,rank){
+  const table=window.ORC_LINES||{};
+  const key=String(source||'').toLowerCase();
+  const pool=Array.isArray(table[key])?table[key]:[];
+  const n=Math.floor(+rank);
+  if(!(n>0))return null;
+  for(let i=0;i<pool.length;i++){
+    const row=pool[i];
+    if(!row||!row.file||!row.text)continue;
+    if(Math.floor(+row.rank)===n)return row;
+  }
+  return null;
+}
+function rankText(source,rank){
+  const n=Math.floor(+rank);
+  if(!(n>0))return '';
+  const s=String(source||'').toLowerCase();
+  if(s==='wow')return 'WoW #'+n;
+  if(s==='twitch')return 'Twitch #'+n;
+  return '';
+}
+function viewsText(value){
+  if(value==null||value==='')return '';
+  const n=Math.floor(+value);
+  if(!isFinite(n)||n<0)return '';
+  return n.toLocaleString('en-US')+(n===1?' view':' views');
+}
+function fillCard(ev,user){
+  const bc=clean(ev.broadcaster_name||ev.broadcaster),tt=String(ev.title||'').replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,90)||'Clip';
+  $('title').textContent=bc?bc+': '+tt:tt;const T=$('title');T.style.fontSize=T.textContent.length>44?'22px':T.textContent.length>34?'25px':'';
+  $('creator').innerHTML=ev.creator?'clipped by <b>'+esc(clean(ev.creator))+'</b>':'';
+  $('redeemer').innerHTML='redeemed by <b>'+esc(user)+'</b>';
+  const th=String(ev.thumbnail_url||'');if(/^https:\/\//.test(th))$('thumb').src=th;else $('thumb').removeAttribute('src');
+  const rank=rankText(ev.source,ev.rank),views=viewsText(ev.view_count);
+  $('rank').textContent=rank;$('views').textContent=views;
+  $('stats').hidden=!rank&&!views;
+}
+
+// Film countdown. Length is voice_end_s, measured from when the mp3 starts.
+// The big number hits 0 at that moment. A short beat later the caller starts the clip.
+let countRaf=0,countTimer=0,countHold=0;
+function clearCountTimers(){cancelAnimationFrame(countRaf);countRaf=0;clearTimeout(countTimer);countTimer=0;clearTimeout(countHold);countHold=0;}
+function stopCountdown(){clearCountTimers();stage.classList.remove('held');}
+function prepareLeader(seconds){
+  const n=Math.max(0,Math.ceil(+seconds||0));
+  $('count').textContent=String(n);
+  $('hand').style.transform='rotate(0deg)';
+  stage.classList.add('held');
+}
+function startCountdown(seconds,onZero){
+  clearCountTimers();
+  const total=Math.max(0,+seconds||0);
+  const num=$('count'),hand=$('hand');
+  const t0=performance.now();
+  let fired=false;
+  function fire(){
+    if(fired)return;fired=true;
+    cancelAnimationFrame(countRaf);countRaf=0;clearTimeout(countTimer);countTimer=0;
+    num.textContent='0';hand.style.transform='rotate(0deg)';
+    countHold=setTimeout(()=>{countHold=0;if(onZero)onZero();},150);
+  }
+  function draw(now){
+    if(fired)return;
+    const left=(t0+total*1000-now)/1000;
+    hand.style.transform='rotate('+(((now-t0)/1000)%1)*360+'deg)';
+    if(left<=0){fire();return;}
+    num.textContent=String(Math.ceil(left));
+    countRaf=requestAnimationFrame(draw);
+  }
+  stage.classList.add('held');
+  if(total<=0){fire();return;}
+  num.textContent=String(Math.ceil(total));
+  hand.style.transform='rotate(0deg)';
+  countTimer=setTimeout(fire,total*1000);
+  countRaf=requestAnimationFrame(draw);
+}
 
 const queue=[];let busy=false;
 function present(ev){queue.push(ev);if(!busy)run();}
+// Play the clip. frameUp means the gold frame is already on screen (countdown just ended).
+// armed means the mp4 is paused on its first frame and only needs play().
+async function presentClip(ev,user,opts){opts=opts||{};
+ const vsrc=videoUrl(ev.video_url),emb=(ev.embed_url||ev.clip_id||ev.clip_url)?embedUrl(ev):'';
+ fillCard(ev,user);
+ const f=$('clip');let shown=false;
+ if(vsrc){
+  if(opts.frameUp)set('in','clip','isvid');
+  else{set('in','clip','isvid');await wait(750);}
+  window.orcClip.clipAt=performance.now();
+  const r=opts.armed?await startHeldVideo(ev.duration):await playVideo(vsrc,ev.duration);
+  window.orcClip.vresult=r;
+  stopVideo();shown=r!=='error';
+  if(!shown&&!emb){set('in','clipout');await wait(500);$('msg').innerHTML=line('none',user);set('in','say');await wait(2600);}
+ }
+ if(!shown&&emb){
+  const dur=Math.min(MAXDUR,(+ev.duration>0?+ev.duration:30))+BUFFER;
+  // Twitch refuses autoplay if the iframe was hidden, or if anything overlaps it.
+  // The countdown is gone before we get here. A frame that just animated in still waits.
+  if(opts.frameUp){set('in','clip');await wait(100);}
+  else{set('in','clip');await wait(750);}
+  window.orcClip.clipAt=performance.now();
+  f.src=emb;
+  const bar=$('bar').firstElementChild;bar.style.transition='none';bar.style.width='0';void bar.offsetWidth;bar.style.transition='width '+dur+'s linear';bar.style.width='100%';
+  await wait(dur*1000);shown=true;}
+ if(shown){set('in','clipout'+(vsrc&&!String(f.src||'').includes('twitch')?' isvid':''));await wait(500);}
+ f.src='about:blank';$('thumb').removeAttribute('src');
+}
 async function run(){busy=true;
  while(queue.length){const ev=queue.shift();
-  const user=clean(ev.user||ev.login)||'someone',src=voiceUrl(ev.voice_line),emb=(ev.embed_url||ev.clip_id||ev.clip_url)?embedUrl(ev):'';
-  window.orcClip.last={user,voice:src,embed:emb};
-  $('msg').innerHTML=line((emb||ev.video_url)?'intro':'none',user);
-  set('in');await wait(1000);
-  set('in','say','talking');
-  const spoke=await playVoice(src);
-  if(!spoke)await wait((emb||ev.video_url)?1400:2600); // no line: show him briefly
-  set('in','say');
-  const vsrc=videoUrl(ev.video_url);
-  if(vsrc||emb){
-   const bc=clean(ev.broadcaster_name||ev.broadcaster),tt=String(ev.title||'').replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,90)||'Clip';
-   $('title').textContent=bc?bc+': '+tt:tt;const T=$('title');T.style.fontSize=T.textContent.length>44?'22px':T.textContent.length>34?'25px':'';
-   $('creator').innerHTML=ev.creator?'clipped by <b>'+esc(clean(ev.creator))+'</b>':'';
-   $('redeemer').innerHTML='redeemed by <b>'+esc(user)+'</b>';
-   const th=String(ev.thumbnail_url||'');if(/^https:\/\//.test(th))$('thumb').src=th;else $('thumb').removeAttribute('src');
-   const f=$('clip');let shown=false;
-   if(vsrc){stage.classList.add('isvid');set('in','clip','isvid');await wait(750);
-    const r=await playVideo(vsrc,ev.duration);window.orcClip.vresult=r;stopVideo();shown=r!=='error';
-    if(!shown&&!emb){set('in','clipout');await wait(500);$('msg').innerHTML=line('none',user);set('in','say');await wait(2600);}}
-   if(!shown&&emb){
-    const dur=Math.min(MAXDUR,(+ev.duration>0?+ev.duration:30))+BUFFER;
-    set('in','clip');await wait(750); // frame fully visible first: Twitch refuses autoplay on hidden/transparent iframes
-    f.src=emb;
-    const bar=$('bar').firstElementChild;bar.style.transition='none';bar.style.width='0';void bar.offsetWidth;bar.style.transition='width '+dur+'s linear';bar.style.width='100%';
-    await wait(dur*1000);shown=true;}
-   if(shown){set('in','clipout'+(vsrc&&!f.src.includes('twitch')?' isvid':''));await wait(500);}
-   f.src='about:blank';$('thumb').removeAttribute('src');
-  }else await wait(800);
+  const user=clean(ev.user||ev.login)||'someone';
+  const vsrc=videoUrl(ev.video_url),emb=(ev.embed_url||ev.clip_id||ev.clip_url)?embedUrl(ev):'';
+  const hasClip=!!(vsrc||emb);
+  // A ranked line only makes sense when we actually have that clip to show.
+  const ranked=hasClip?findLine(ev.source,ev.rank):null;
+  const voiceEnd=ranked?+ranked.voice_end_s:0;
+  const hold=!!(ranked&&voiceEnd>0);
+  const fallback=voiceUrl(ev.voice_line);
+  window.orcClip.last={user,voice:ranked?('audio/'+ranked.file):fallback,embed:emb,source:ev.source||'',rank:+ev.rank||0};
+  if(ranked)$('msg').textContent=ranked.text;
+  else $('msg').innerHTML=line(hasClip?'intro':'none',user);
+  set('in');
+  // Fetch the first frame while the orc slides in, so the countdown has a picture under it.
+  const holding=hold&&vsrc?holdVideo(vsrc):null;
+  await wait(1000);
+  let playedRanked=false,armed=false;
+  if(ranked){
+   if(hold){
+    fillCard(ev,user);
+    armed=holding?await holding:false;
+    if(!armed&&vsrc)stopVideo();
+    set('in','say','talking','clip',armed?'isvid':'');
+    prepareLeader(voiceEnd);
+   }else set('in','say','talking');
+   playedRanked=await playVoice('audio/'+encodeURI(ranked.file),{voiceEnd:voiceEnd,countdown:hold});
+   if(!playedRanked){
+    // The ranked mp3 failed. Do what the widget used to do: the server voice line, or a short pause.
+    stopCountdown();stage.classList.remove('isvid');stopVideo();armed=false;
+    set('in','say','talking');
+    const spoke=fallback?await playVoice(fallback):false;
+    if(!spoke)await wait(hasClip?1400:2600);
+   }
+  }else{
+   set('in','say','talking');
+   const spoke=await playVoice(fallback);
+   if(!spoke)await wait(hasClip?1400:2600); // no line: show him briefly
+  }
+  stopCountdown();
+  if(hasClip)await presentClip(ev,user,{frameUp:!!(playedRanked&&hold),armed:!!(playedRanked&&armed)});
+  else{set('in','say');await wait(800);}
   set('out');await wait(850);set();await wait(400);
  }
  busy=false;}
-window.orcClip={present,queue,parents:PARENTS,embedUrl,videoUrl};
+window.orcClip={present,queue,parents:PARENTS,embedUrl,videoUrl,findLine,rankText,viewsText};
 
 // ---- Production Center feed: GET /events?since=N (since=-1 first = sync cursor, skip backlog) ----
 const seen=new Set();
@@ -128,9 +292,17 @@ if(USE_SERVER&&!(TEST&&g('server')==null)){let since=-1,delay=1000;
   }catch(e){delay=Math.min(delay*2,15000);}
   setTimeout(poll,delay);})();}
 
-if(TEST){const clip=g('clip')||'IncredulousAbstemiousFennelImGlitch';
+if(TESTKEY==='1'){const clip=g('clip')||'IncredulousAbstemiousFennelImGlitch';
  const evs=[{type:'clip',user:'Thrallbert',voice_line:'test/voice-test.mp3',video_url:'test/clip-test.mp4',title:'Lok\'tar ogar!',creator:'Peonwork',broadcaster_name:'Durotan_Live',duration:0},
   {type:'clip',user:'Garroshka',voice_line:'test/voice-test.mp3',clip_id:clip,embed_url:'https://clips.twitch.tv/embed?clip='+clip,title:'Test clip: Lok\'tar ogar!',creator:'Peonwork',broadcaster_name:'Durotan_Live',duration:+(g('testdur')||8)},
   {type:'clip',user:'Jainabelle',voice_line:'',clip_id:''}];
  let i=0;present(evs[i++]);if(!ONCE)setInterval(()=>{if(!busy&&!queue.length)present(evs[i++%evs.length]);},4000);}
+else if(TESTKEY==='wow'||TESTKEY==='twitch'){
+ // Preview one rank with the local test clip. A rank with no line falls back to a silent orc, then the clip.
+ let rank=Math.floor(+g('rank'));if(!(rank>0))rank=1;
+ const ev={type:'clip',user:'Thrallbert',voice_line:'',video_url:'test/clip-test.mp4',
+  title:TESTKEY==='wow'?'Test clip from Azeroth':'Test clip from Twitch',
+  creator:'Peonwork',broadcaster_name:'Durotan_Live',duration:5,
+  source:TESTKEY,rank:rank,view_count:12345};
+ present(ev);if(!ONCE)setInterval(()=>{if(!busy&&!queue.length)present(Object.assign({},ev));},4000);}
 })();

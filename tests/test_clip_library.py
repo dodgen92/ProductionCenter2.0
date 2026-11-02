@@ -194,6 +194,10 @@ def test_refresh_writes_an_index_and_skips_a_failed_download(monkeypatch, capsys
     global_b = helix_clip("GlobalB", 700, title="Another")
     fail_clip = helix_clip("FailClip", 800, title="Broken download")
 
+    # clips.py asks Helix with APP_CLIENT_ID. TWITCH_CLIENT_ID is the user
+    # token for EventSub, and this test must not depend on that name.
+    monkeypatch.setenv("APP_CLIENT_ID", "test-app-client-id")
+
     def fake_post(url, params=None, timeout=None, **kwargs):
         assert url == "https://id.twitch.tv/oauth2/token"
         assert (params or {}).get("grant_type") == "client_credentials"
@@ -201,7 +205,7 @@ def test_refresh_writes_an_index_and_skips_a_failed_download(monkeypatch, capsys
 
     def fake_get(url, headers=None, params=None, timeout=None):
         assert headers["Authorization"] == "Bearer app-token"
-        assert headers["Client-ID"] == "test-client-id"
+        assert headers["Client-ID"] == "test-app-client-id"
         params = params or {}
         if url.endswith("/games/top"):
             return JsonResponse({"data": [
@@ -246,8 +250,17 @@ def test_refresh_writes_an_index_and_skips_a_failed_download(monkeypatch, capsys
         "creator": "Peonwork",
         "duration": 12.5,
         "view_count": 30,
+        "source": "wow",
+        "rank": 1,
         "thumbnail_url": "https://example.test/a.jpg",
     }
+    # FailClip was Twitch #2 and did not download. GlobalB stays #3.
+    assert by_id["WowB"]["source"] == "wow"
+    assert by_id["WowB"]["rank"] == 2
+    assert by_id["GlobalA"]["source"] == "twitch"
+    assert by_id["GlobalA"]["rank"] == 1
+    assert by_id["GlobalB"]["source"] == "twitch"
+    assert by_id["GlobalB"]["rank"] == 3
     assert (folder / "WowA.mp4").is_file()
     assert all(url.startswith("https://clips.twitch.tv/") for url in FakeYDL.urls)
     assert all("app-token" not in url for url in FakeYDL.urls)
@@ -277,6 +290,8 @@ def test_play_a_clip_publishes_a_random_local_file(monkeypatch, tmp_path):
         "creator": "Peonwork",
         "duration": 12.5,
         "view_count": 99,
+        "source": "twitch",
+        "rank": 2,
         "thumbnail_url": "https://example.test/thumb.jpg",
     }
     (folder / "index.json").write_text(json.dumps([entry]), encoding="utf-8")
@@ -311,6 +326,9 @@ def test_play_a_clip_publishes_a_random_local_file(monkeypatch, tmp_path):
     assert event["creator"] == "Peonwork"
     assert event["duration"] == 12.5
     assert event["thumbnail_url"] == "https://example.test/thumb.jpg"
+    assert event["view_count"] == 99
+    assert event["source"] == "twitch"
+    assert event["rank"] == 2
 
 
 def test_play_a_clip_falls_back_to_embed_when_library_is_empty(monkeypatch, tmp_path):
@@ -360,6 +378,10 @@ def test_play_a_clip_falls_back_to_embed_when_library_is_empty(monkeypatch, tmp_
     assert event["duration"] == 8
     assert event["video_url"] == ""
     assert event["voice_line"] == "/voice_lines/orc/hello.mp3"
+    # One clip in the fake list, and Helix puts the most-viewed clip first.
+    assert event["source"] == "wow"
+    assert event["rank"] == 1
+    assert "view_count" not in event
 
 
 def test_clips_route_supports_range_and_rejects_traversal(client, tmp_path):
@@ -429,3 +451,90 @@ def test_widgets_are_served_from_the_repo_folder(client, monkeypatch):
     assert page.headers["Cache-Control"] == "no-store"
     assert style.status_code == 200
     assert Server.widgets_directory() == Server.BASE_DIR / "widgets"
+
+
+def test_library_ranks_wow_and_twitch_separately():
+    """WoW #1 is the most-viewed WoW clip. A clip in both lists keeps the WoW rank.
+
+    The shared clip still occupies its place in the Twitch list, so the next
+    Twitch clip does not move up to that number.
+    """
+
+    # Proves: rank is the place in each fetched list, not a recount after deduping.
+
+    wow = [
+        {"id": "wow-low", "view_count": 10},
+        {"id": "shared", "view_count": 500},
+        {"id": "wow-mid", "view_count": 400},
+    ]
+    games = [[
+        {"id": "global-top", "view_count": 900},
+        {"id": "shared", "view_count": 500},
+        {"id": "global-low", "view_count": 50},
+    ]]
+
+    # Act
+    chosen = clips.choose_library_clips(wow, games)
+
+    # Assert
+    by_id = {item["id"]: item for item in chosen}
+    assert by_id["shared"]["source"] == "wow"
+    assert by_id["shared"]["rank"] == 1
+    assert by_id["wow-mid"]["source"] == "wow"
+    assert by_id["wow-mid"]["rank"] == 2
+    assert by_id["wow-low"]["rank"] == 3
+    assert by_id["global-top"]["source"] == "twitch"
+    assert by_id["global-top"]["rank"] == 1
+    # shared would have been Twitch #2. global-low stays Twitch #3.
+    assert by_id["global-low"]["source"] == "twitch"
+    assert by_id["global-low"]["rank"] == 3
+
+
+def test_fallback_clip_uses_its_place_in_the_wow_list(monkeypatch):
+    """Picking the second Helix clip marks it WoW #2."""
+
+    # Proves: the embed fallback still has a rank, taken from the list order.
+    # Helix puts the most-viewed clip first. No download, no network.
+
+    def fake_token():
+        return "app-token"
+
+    def fake_wow(token, hours=200, now=None):
+        assert token == "app-token"
+        return [
+            helix_clip("Top", 100, title="First"),
+            helix_clip("Second", 40, title="Second"),
+        ]
+
+    monkeypatch.setattr(Server.clips, "get_app_token", fake_token)
+    monkeypatch.setattr(Server.clips, "get_top_wow_clips", fake_wow)
+    monkeypatch.setattr(Server.random, "randrange", lambda n: 1)
+
+    # Act
+    clip = Server.fetch_random_clip()
+
+    # Assert
+    assert clip["id"] == "Second"
+    assert clip["source"] == "wow"
+    assert clip["rank"] == 2
+    assert clip["view_count"] == 40
+
+
+def test_clip_event_skips_rank_when_the_row_has_none():
+    """An older index row still plays. Rank is left off so the widget uses voice_line."""
+
+    # Proves: a library built before ranks existed does not get a made-up rank.
+
+    # Act
+    fields = Server.clip_event_fields({
+        "file": "demo.mp4",
+        "title": "Old row",
+        "view_count": 12,
+    })
+
+    # Assert
+    assert fields["video_url"] == "/clips/demo.mp4"
+    assert fields["view_count"] == 12
+    assert fields["title"] == "Old row"
+    assert "source" not in fields
+    assert "rank" not in fields
