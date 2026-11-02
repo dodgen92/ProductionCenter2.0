@@ -23,8 +23,8 @@ window.ORC_LINES = {
     {"file": "WoW10.mp3", "rank": 1, "text": "The number one moment in Azeroth today, Lokhtar!", "voice_start_s": 1.0, "voice_end_s": 5.49}
   ],
   "twitch": [
-    {"file": "Twitch1.mp3", "rank": 5, "text": "The fifth best clip in all of Twitch right here, Loqtar.", "voice_start_s": 1.0, "voice_end_s": 5.15},
-    {"file": "Twitch2.mp3", "rank": 4, "text": "The fourth most popular clip on Twitch, Loqtar Keep Climbing Whelps.", "voice_start_s": 1.0, "voice_end_s": 6.32},
+    {"file": "Twitch1.mp3", "rank": 5, "text": "The fifth best clip in all of Twitch right here, Lok'tar.", "voice_start_s": 1.0, "voice_end_s": 5.15},
+    {"file": "Twitch2.mp3", "rank": 4, "text": "The fourth most popular clip on Twitch, Lok'tar Keep Climbing Whelps.", "voice_start_s": 1.0, "voice_end_s": 6.32},
     {"file": "Twitch3.mp3", "rank": 3, "text": "Third most popular clip on Twitch. The war drums grow louder.", "voice_start_s": 1.0, "voice_end_s": 5.94},
     {"file": "Twitch4.mp3", "rank": 2, "text": "The second mightiest clip on all of Twitch right here.", "voice_start_s": 1.0, "voice_end_s": 5.78},
     {"file": "Twitch5.mp3", "rank": 1, "text": "This is the most popular clip on all of Twitch. The Bards will sing of this. Poorly, but they will sing.", "voice_start_s": 1.0, "voice_end_s": 9.62}

@@ -62,6 +62,10 @@ def test_voice_lines_match_ranks_and_audio_files():
         assert row["text"].strip()
         assert row["voice_end_s"] > row["voice_start_s"] >= 0
 
+    raw_text = LINES_JS.read_text(encoding="utf-8")
+    assert "Loqtar" not in raw_text
+    assert "Lok'tar" in raw_text
+
     listed = [row["file"] for row in lines["wow"] + lines["twitch"]]
     on_disk = {path.name for path in AUDIO.glob("*.mp3")}
     assert set(listed) == on_disk

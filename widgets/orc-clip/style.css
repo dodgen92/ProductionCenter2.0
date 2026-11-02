@@ -1,27 +1,44 @@
 @font-face{font-family:'Archivo Narrow Local';src:url('ArchivoNarrow.ttf');font-weight:400 700}
-:root{--scale:1;--paper:#fff6e3;--ink:#3b2a1a;--edge:#b98a4a;--dark:#1d140c}
+:root{
+  --scale:1;--paper:#fff6e3;--ink:#3b2a1a;--edge:#b98a4a;--dark:#1d140c;
+  /* Clip frame on the 1920x1080 page. Pixels.
+     Default fills the open area left of the webcam and above chat:
+     x 10-1460, y 10-930 (about 0.5% to 76% wide, 1% to 86% tall).
+     Change these four to move or resize the whole frame.
+     URL overrides: ?framex= ?framey= ?framew= ?frameh= */
+  --frame-left:10px;
+  --frame-top:10px;
+  --frame-width:1450px;
+  --frame-height:920px;
+  /* Title, rank, footer, and the countdown. 1 was the old small frame. */
+  --frame-font:1.65;
+}
 html,body{margin:0;background:transparent;width:1920px;height:1080px;overflow:hidden;font-family:'Archivo Narrow Local','Arial Narrow',sans-serif}
 #stage{position:absolute;inset:0;pointer-events:none;transform-origin:top left}
 #stage.scaled{transform:scale(var(--scale))} /* only when ?scale= is set: Twitch's visibility check dislikes transformed ancestors */
-/* keep a gap between orc and frame: Twitch refuses autoplay if ANY element overlaps the iframe (incl. drop-shadows) */
-/* layout: everything stays left of the cam (cam = x1240-1880, y600-960) */
-#frame{position:absolute;top:110px;left:490px;width:740px;opacity:0;transform:translateY(-40px) scale(.92)}
-.right #frame{left:30px}
+/* The orc may overlap the frame. He slides off before the clip plays.
+   A Twitch iframe still refuses autoplay if something overlaps it, so the
+   countdown is gone and he is leaving before that iframe is created. */
+/* ?side=right moves the orc to the right. The frame stays on --frame-left
+   so the default size does not jump onto the webcam (cam ≈ x1240-1880). */
+#frame{position:absolute;top:var(--frame-top);left:var(--frame-left);width:var(--frame-width);height:var(--frame-height);box-sizing:border-box;display:flex;flex-direction:column;opacity:0;transform:translateY(-40px) scale(.92)}
 #orcbox{position:absolute;left:10px;bottom:0;width:440px;height:820px}
 .right #orcbox{left:820px}
 /* WoW-style frame: dark leather + gold trim */
 #frame{background:linear-gradient(#2b1e12,#1a110a);border:3px solid #3a3020;border-radius:10px;box-shadow:0 0 0 2px #c9a227 inset,0 0 0 5px #3a3020 inset,0 10px 30px rgba(0,0,0,.6);padding:10px}
-.hdr{display:flex;align-items:center;gap:10px;color:#ffd77a;font-weight:700;font-size:28px;text-shadow:0 2px 0 #000;padding:2px 6px 8px}
+.hdr{display:flex;align-items:center;gap:10px;color:#ffd77a;font-weight:700;font-size:calc(28px * var(--frame-font));text-shadow:0 2px 0 #000;padding:2px 6px 8px}
 #title{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
-.gem{width:14px;height:14px;transform:rotate(45deg);background:radial-gradient(circle at 35% 35%,#ffe9a8,#c9a227 50%,#6b4c10);box-shadow:0 0 6px #ffd77a}
-#screen{position:relative;width:720px;height:405px;background:#000;border:2px solid #c9a227;border-radius:4px;overflow:hidden}
+.gem{width:calc(14px * var(--frame-font));height:calc(14px * var(--frame-font));transform:rotate(45deg);background:radial-gradient(circle at 35% 35%,#ffe9a8,#c9a227 50%,#6b4c10);box-shadow:0 0 6px #ffd77a}
+/* Leftover space after the title, rank, bar, and footer. The video stays 16:9 and letterboxes in the middle. */
+#screenbox{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center}
+#screen{position:relative;box-sizing:border-box;height:100%;width:auto;max-width:100%;aspect-ratio:16/9;background:#000;border:2px solid #c9a227;border-radius:4px;overflow:hidden}
 #screen>*{position:absolute;inset:0;width:100%;height:100%;border:0}
 #thumb{object-fit:cover;opacity:.55}#thumb:not([src]){display:none}
-#ph{display:flex;align-items:center;justify-content:center;color:#d9c49a;font-size:26px;height:auto;top:auto;bottom:16px}
+#ph{display:flex;align-items:center;justify-content:center;color:#d9c49a;font-size:calc(26px * var(--frame-font));height:auto;top:auto;bottom:16px}
 #clip{background:#000}
 #vid{object-fit:contain;background:#000;display:none}.isvid #vid{display:block}.isvid #clip,.isvid #ph{display:none}
 #bar{height:5px;margin-top:6px;background:rgba(0,0,0,.5);border-radius:3px;overflow:hidden}#bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#c9a227,#ffd77a)}
-.foot{display:flex;justify-content:space-between;color:#e8d6ae;font-size:22px;padding:8px 6px 0;gap:14px}.foot span:empty{display:none}
+.foot{display:flex;justify-content:space-between;color:#e8d6ae;font-size:calc(22px * var(--frame-font));padding:8px 6px 0;gap:14px}.foot span:empty{display:none}
 .foot b{color:#ffd77a}
 .clip #frame{opacity:1;transform:none;animation:frIn .7s cubic-bezier(.3,1.4,.5,1)}
 .clipout #frame{animation:frOut .5s ease-in forwards}
@@ -74,7 +91,7 @@ html,body{margin:0;background:transparent;width:1920px;height:1080px;overflow:hi
 @keyframes idle2{0%,100%{transform:translateY(0) rotate(0)}25%{transform:translateY(-3px) rotate(-.7deg) scale(1.004,1.01)}50%{transform:translateY(-5px) scale(1.01,1.018)}75%{transform:translateY(-3px) rotate(.7deg) scale(1.004,1.01)}}
 
 /* rank + views, same gold as the frame header */
-#stats{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:0 8px 6px;color:#e8d6ae;font-size:22px;font-weight:700;text-shadow:0 2px 0 #000}
+#stats{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:0 8px 6px;color:#e8d6ae;font-size:calc(22px * var(--frame-font));font-weight:700;text-shadow:0 2px 0 #000}
 #stats[hidden]{display:none !important}
 #rank{color:#ffd77a}
 #views{margin-left:auto}
@@ -90,7 +107,7 @@ html,body{margin:0;background:transparent;width:1920px;height:1080px;overflow:hi
  animation:grain .16s steps(2,end) infinite}
 @keyframes grain{0%{transform:translate(0,0)}100%{transform:translate(-14px,10px)}}
 @keyframes flicker{0%,100%{filter:contrast(1) brightness(1)}45%{filter:contrast(1.08) brightness(.94)}70%{filter:contrast(.96) brightness(1.06)}}
-.clock{position:relative;width:248px;height:248px;border-radius:50%;border:10px solid #f4f0e6;
+.clock{position:relative;width:calc(248px * var(--frame-font));height:calc(248px * var(--frame-font));border-radius:50%;border:calc(8px * var(--frame-font)) solid #f4f0e6;
  box-shadow:0 0 0 4px #1a140c,inset 0 0 0 3px #1a140c,0 0 24px rgba(0,0,0,.65);
  background:radial-gradient(circle at 50% 45%,rgba(28,24,18,.35),rgba(0,0,0,.55) 70%)}
 .clock:before{content:'';position:absolute;inset:0;border-radius:50%;opacity:.8;background:
@@ -101,5 +118,5 @@ html,body{margin:0;background:transparent;width:1920px;height:1080px;overflow:hi
 #hand{position:absolute;left:50%;bottom:50%;width:4px;height:48%;margin-left:-2px;transform-origin:50% 100%;
  background:linear-gradient(to top,transparent 0 36%,#f7f3ea 36%)}
 #count{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
- font-family:Impact,'Arial Black',sans-serif;font-size:112px;line-height:1;color:#f7f3ea;
+ font-family:Impact,'Arial Black',sans-serif;font-size:calc(112px * var(--frame-font));line-height:1;color:#f7f3ea;
  text-shadow:0 3px 0 #000,0 0 12px rgba(0,0,0,.8)}

@@ -16,13 +16,15 @@ Use the word `localhost` in the URL, not 127.0.0.1. Otherwise set `&parent=127.0
 |---|---|---|
 | server | http://localhost:5000 | Production Center (`0` = off) |
 | reward | Play a Clip | if the event carries `reward`, it must match (case-insensitive). Events without `reward` always fire |
-| side | left | `right` = clip frame on the left, orc on its right (both stay clear of the cam at x1240-1880, y600-960) |
+| side | left | `right` moves the orc to the right. The frame stays where the CSS variables put it, so it does not jump onto the webcam |
 | vvol | 0.9 | voice line volume 0-1 |
 | muted | 0 | `1` = start the clip muted |
 | parent | page hostname over http, else `localhost` | comma list allowed |
 | maxdur | 60 | cap in seconds on how long a clip is shown |
 | buffer | 5 | seconds added to `duration` for the embed to load and start |
 | scale | 1 | scale the whole layout |
+| framex, framey | 10, 10 | frame position in pixels. Same as `--frame-left` and `--frame-top` in `style.css` |
+| framew, frameh | 1450, 920 | frame size in pixels. Same as `--frame-width` and `--frame-height`. The video stays 16:9 inside that box |
 | test | | `1` = the old fake cycle (voice line `test/voice-test.mp3` plus a real public clip). `wow` or `twitch` previews one rank, for example `?test=wow&rank=3` or `?test=twitch&rank=1` (local test clip, 12,345 views). `&once=1` plays one. `&clip=SLUG` uses your own clip with `test=1` |
 
 ## Behaviour

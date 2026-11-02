@@ -19,6 +19,9 @@ const PARENTS=(g('parent')||(/^https?:$/.test(location.protocol)&&location.hostn
 const stage=document.getElementById('stage'),$=id=>document.getElementById(id);
 const side=(g('side')||'left').toLowerCase()==='right'?'right':'left';
 if(g('scale'))stage.style.setProperty('--scale',+g('scale')||1);
+// Frame box, pixels. Defaults live in style.css (--frame-left and the rest).
+function framePx(name,cssName){const raw=g(name);if(raw==null||raw==='')return;const n=+raw;if(!isFinite(n)||n<0)return;stage.style.setProperty(cssName,Math.round(n)+'px');}
+framePx('framex','--frame-left');framePx('framey','--frame-top');framePx('framew','--frame-width');framePx('frameh','--frame-height');
 const SC=g('scale')?'scaled':'';
 const set=(...c)=>{stage.className=[side,SC,...c].filter(Boolean).join(' ');};set();
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
@@ -152,7 +155,9 @@ function viewsText(value){
 }
 function fillCard(ev,user){
   const bc=clean(ev.broadcaster_name||ev.broadcaster),tt=String(ev.title||'').replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,90)||'Clip';
-  $('title').textContent=bc?bc+': '+tt:tt;const T=$('title');T.style.fontSize=T.textContent.length>44?'22px':T.textContent.length>34?'25px':'';
+  $('title').textContent=bc?bc+': '+tt:tt;const T=$('title');
+  const type=parseFloat(getComputedStyle(stage).getPropertyValue('--frame-font'))||1;
+  T.style.fontSize=T.textContent.length>44?(22*type)+'px':T.textContent.length>34?(25*type)+'px':'';
   $('creator').innerHTML=ev.creator?'clipped by <b>'+esc(clean(ev.creator))+'</b>':'';
   $('redeemer').innerHTML='redeemed by <b>'+esc(user)+'</b>';
   const th=String(ev.thumbnail_url||'');if(/^https:\/\//.test(th))$('thumb').src=th;else $('thumb').removeAttribute('src');
