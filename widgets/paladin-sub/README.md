@@ -24,7 +24,7 @@ Edit the wording in `lines.js` (open it in Notepad). Change `text`. Leave `file`
 
 The bubble and the line stay up until the mp3 ends (`ended`). If the file fails to load, he gives up after about 6 seconds so the next alert is not stuck. There is also a 90 second cap if a clip starts and never ends. Alerts that arrive while he is talking wait. They do not play on top of each other.
 
-`?sound=0` mutes the mp3. The line text still shows, for the normal alert time. `?vol=` is the volume, 0 to 1, default 0.8. In OBS, tick **Control audio via OBS** so the voice shows up in your mixer.
+The music is already mixed into each file in `audio/`, including the follow lines. One mp3 is the whole alert. `?vol=` is the volume of that file, 0 to 1, default 0.8. `?sound=0` mutes it. The line text still shows, for the normal alert time. In OBS, tick **Control audio via OBS** so it shows up in the mixer.
 
 `sounds/sounds.js` is only a fallback for an alert that has no voice line. Follows with no follow line stay silent. Leave that list empty.
 
@@ -71,8 +71,8 @@ The server already subscribes to follows (`channel.follow` v2, scope `moderator:
 | `duration` | 6 | Seconds per alert (min 4) |
 | `test` | off | `1` cycles sub, resub, gift, raid, bits, and follow every 9s. Or `test=follow` / `sub` / `resub` / `gift` / `bits` / `cheer` / `raid` for one type |
 | `once` | off | With `test=1`, play one alert only |
-| `vol` | 0.8 | Sound volume, 0 to 1 |
-| `sound` | on | `0` = mute the sounds |
+| `vol` | 0.8 | Volume of the mixed mp3, 0 to 1 |
+| `sound` | on | `0` = mute that mp3 |
 | `follows` | on | `0` = no follow alerts |
 | `followdur` | 3.5 | Seconds per follow alert |
 | `server` | http://localhost:5000 | Production Center URL; `0` = off (test mode skips it unless set) |

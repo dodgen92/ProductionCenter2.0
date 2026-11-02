@@ -477,10 +477,19 @@ def clip_event_fields(clip):
     return fields
 
 
+# True from the moment startup starts deleting old clips until the new
+# index is finished. A redeem in that window must not point at a missing mp4.
+_clips_downloading = False
+
+
 def play_clip_for(user, login, reward=""):
     """Publish a clip event. Prefer a downloaded mp4. Otherwise ask Helix."""
 
     clip = pick_local_clip()
+    if clip is None and _clips_downloading:
+        # None of the mp4s are ready yet. The embed fallback below leaves
+        # video_url blank, so the widget does not try to play a missing file.
+        print("[Server] clip not downloaded yet")
     if clip is None:
         try:
             clip = fetch_random_clip()
@@ -587,21 +596,118 @@ def read_clip_index():
     return ready
 
 
+# One bag for every downloaded clip. The redeem picks from the whole library,
+# not a separate wow bag and twitch bag. shuffle.json remembers the round.
+# Delete that file to start over. It is gitignored with the rest of clips_cache.
+SHUFFLE_NAME = "shuffle.json"
+_shuffle_lock = threading.Lock()
+
+
+def _empty_shuffle():
+    return {"deck": [], "last": "", "pool": []}
+
+
+def _read_shuffle():
+    """The saved round. A missing or broken file starts a fresh one."""
+
+    path = CLIPS_DIR / SHUFFLE_NAME
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return _empty_shuffle()
+    if not isinstance(data, dict):
+        return _empty_shuffle()
+
+    def names(key):
+        raw = data.get(key)
+        if not isinstance(raw, list):
+            return []
+        return [str(item) for item in raw if str(item or "")]
+
+    last = data.get("last")
+    return {
+        "deck": names("deck"),
+        "last": last if isinstance(last, str) else "",
+        "pool": names("pool"),
+    }
+
+
+def _write_shuffle(state):
+    CLIPS_DIR.mkdir(parents=True, exist_ok=True)
+    path = CLIPS_DIR / SHUFFLE_NAME
+    temp = path.with_suffix(".json.tmp")
+    temp.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    temp.replace(path)
+
+
+def _clip_key(entry):
+    """Bag key. The mp4 name is unique for a downloaded clip."""
+
+    return str((entry or {}).get("file") or "")
+
+
+def next_from_bag(entries, state):
+    """Pick one clip. No repeats until every current file has been used.
+
+    `deck` is what is left this round. `pool` is every file that belongs to
+    the round, so a new download can be told apart from one already played.
+    A file that left the library is dropped. New files join the round in
+    progress. An empty deck starts a new shuffle, and that shuffle does not
+    open with the clip that just played.
+    """
+
+    by_key = {}
+    for entry in entries or []:
+        key = _clip_key(entry)
+        if key and key not in by_key:
+            by_key[key] = entry
+    if not by_key:
+        return None, state or _empty_shuffle()
+    state = state or _empty_shuffle()
+    have = set(by_key)
+    pool = [key for key in state.get("pool") or [] if key in have]
+    in_pool = set(pool)
+    deck = [key for key in state.get("deck") or [] if key in in_pool]
+    extra = [key for key in by_key if key not in in_pool]
+    random.shuffle(extra)
+    last = state.get("last") or ""
+    if last not in have:
+        last = ""
+    if not deck:
+        deck = list(by_key)
+        random.shuffle(deck)
+        # Pop takes the end, so the end is the next clip.
+        if len(deck) > 1 and deck[-1] == last:
+            deck[0], deck[-1] = deck[-1], deck[0]
+        pool = list(by_key)
+    else:
+        # Keep the clips already queued. New downloads wait behind them.
+        deck = extra + deck
+        pool = pool + extra
+    pick = deck.pop()
+    return by_key[pick], {"deck": deck, "last": pick, "pool": pool}
+
+
 def pick_local_clip():
-    """One random downloaded clip, or None when the library is empty."""
+    """One downloaded clip that has not played yet this round, or None."""
 
     entries = read_clip_index()
     if not entries:
         return None
-    return random.choice(entries)
+    with _shuffle_lock:
+        chosen, state = next_from_bag(entries, _read_shuffle())
+        if chosen is None:
+            return None
+        _write_shuffle(state)
+        return chosen
 
 
 def clear_clip_cache():
-    """Delete last startup's clips. Leave .gitkeep so the folder stays in git."""
+    """Delete last startup's clips. Leave .gitkeep and the shuffle bag."""
 
     CLIPS_DIR.mkdir(parents=True, exist_ok=True)
     for path in CLIPS_DIR.iterdir():
-        if not path.is_file() or path.name == ".gitkeep":
+        if not path.is_file() or path.name in {".gitkeep", SHUFFLE_NAME}:
             continue
         try:
             path.unlink()
@@ -613,10 +719,14 @@ def clear_clip_cache():
 def refresh_clip_library():
     """Rebuild clips_cache. Meant to run in a background thread so startup is not blocked.
 
-    Until this finishes, Play a Clip uses the Helix embed fallback.
+    Until the first mp4 is saved, Play a Clip uses the Helix embed fallback.
+    After that, a redeem can play a file that is already on disk.
     """
 
+    global _clips_downloading
     print("[Server] Clip library: clearing old files.")
+    entries = []
+    _clips_downloading = True
     try:
         clear_clip_cache()
         token = clips.get_app_token()
@@ -625,6 +735,8 @@ def refresh_clip_library():
         # Do not print the exception text. A token failure can include the URL.
         print(f"[Server] WARNING: clip library failed ({type(exc).__name__}).")
         entries = []
+    finally:
+        _clips_downloading = False
     print(f"[Server] downloaded {len(entries)} clips")
 
 

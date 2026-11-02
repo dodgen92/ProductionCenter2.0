@@ -34,6 +34,6 @@ A painted gnome scholar (pink pigtails, teal coat, glowing tome) pops up in an a
 | `test` / `once` | off | `test=1` fake redemptions; `once=1` only one |
 
 ## Facts
-Edit `facts/facts.js` in Notepad (instructions at the top). Facts are shuffled and she won't repeat one until she's used them all.
+Edit `facts/facts.js` in Notepad (instructions at the top). Facts are shuffled and she won't repeat one until she's used them all. The remaining round is saved in the browser under `gnome_deck_v1`, so an OBS refresh does not start the list over. A new fact is added to the round in progress. `?test=1` does not use that saved list. To start over, open the page once with `?resetdeck=1`.
 
 Live voice: `GET /tts` on the Production Center (see PRODUCTION-CENTER-SPEC.md). Her body bounces to the real loudness of the audio and the bubble types in time with it. Fallback: browser speechSynthesis (Windows voices). Character art: `gnome.webp` (original painting, cut out with `tools/cutout.py`, not Blizzard art). Font: Archivo Narrow, SIL OFL (`OFL.txt`).

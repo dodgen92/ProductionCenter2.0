@@ -61,6 +61,7 @@ def clean_server_state(monkeypatch, tmp_path):
     Server.EVENTS.clear()
     Server.TR_CACHE.clear()
     Server._last_voice_line = None
+    Server._clips_downloading = False
     with Server._seen_lock:
         Server._seen_ids.clear()
         Server._seen_set.clear()

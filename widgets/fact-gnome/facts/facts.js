@@ -5,6 +5,7 @@
 // 4. Don't use a plain " inside a fact; use ' instead.
 // 5. Save, then in OBS click "Refresh cache of current page" on the source.
 // Facts are shuffled and never repeat until every fact has been used.
+// The browser remembers the round (localStorage gnome_deck_v1). ?resetdeck=1 clears it.
 window.GNOME_FACTS = [
 "WoW shipped with only about sixty five developers, says level designer John Staats. He joined when the team was twenty. Sixty five people built a whole planet. Gnomes built Gnomeregan with fewer, but we don't talk about how that went.",
 "World of Warcraft started back in 1999, five years before launch. Five years! Some of you can't even finish a quest chain in five years.",

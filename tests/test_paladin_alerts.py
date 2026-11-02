@@ -17,6 +17,7 @@ import Server
 
 ROOT = Path(__file__).resolve().parents[1]
 LINES_JS = ROOT / "widgets" / "paladin-sub" / "lines.js"
+PALADIN_JS = ROOT / "widgets" / "paladin-sub" / "paladin.js"
 AUDIO = ROOT / "widgets" / "paladin-sub" / "audio"
 
 
@@ -73,6 +74,18 @@ def test_voice_lines_match_the_audio_files():
     on_disk = {path.name for path in AUDIO.glob("*.mp3")}
     assert set(listed) == on_disk
     assert len(listed) == len(set(listed))
+
+
+def test_voice_line_plays_alone():
+    """A voice line is the whole alert. sounds/ plays only when there is no line."""
+
+    # Proves: the music is inside the mp3 in audio/. The widget does not
+    # start a second file under it. A follow with no line stays silent.
+
+    text = PALADIN_JS.read_text(encoding="utf-8")
+    assert "if(line)voice=playVoice(line);" in text
+    assert "else if(!fol)playSound();" in text
+    assert "BED" not in text
 
 
 def test_widgets_route_serves_a_paladin_line(client, monkeypatch):

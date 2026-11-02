@@ -11,7 +11,9 @@ const SERVER=(g('server')||'http://localhost:5000').replace(/\/+$/,''),USE_SERVE
 const REWARD=(g('reward')||'Play a Clip').trim().toLowerCase();
 const VVOL=Math.min(1,Math.max(0,g('vvol')==null?0.9:+g('vvol')));
 const MUTED=g('muted')==='1';
-const CVOL=Math.min(1,Math.max(0,g('cvol')==null?1:+g('cvol')));
+// Clip <video> volume, 0 to 1. Change 0.8 to taste. ?cvol= overrides it.
+// The voice line is VVOL, not this. The Twitch iframe has no volume setting.
+const CVOL=Math.min(1,Math.max(0,g('cvol')==null?0.8:+g('cvol')));
 const MAXDUR=Math.max(5,+(g('maxdur')||60));
 const BUFFER=Math.max(0,+(g('buffer')||5)); // seconds added for the embed to load + start (measured ~5-7s in headless Chrome)
 // parent= must match the page's hostname. Over http(s) use our own hostname; from file:// fall back to localhost (see README).
@@ -19,6 +21,9 @@ const PARENTS=(g('parent')||(/^https?:$/.test(location.protocol)&&location.hostn
 const stage=document.getElementById('stage'),$=id=>document.getElementById(id);
 const side=(g('side')||'left').toLowerCase()==='right'?'right':'left';
 if(g('scale'))stage.style.setProperty('--scale',+g('scale')||1);
+// Frame box, pixels. Defaults live in style.css (--frame-left and the rest).
+function framePx(name,cssName){const raw=g(name);if(raw==null||raw==='')return;const n=+raw;if(!isFinite(n)||n<0)return;stage.style.setProperty(cssName,Math.round(n)+'px');}
+framePx('framex','--frame-left');framePx('framey','--frame-top');framePx('framew','--frame-width');framePx('frameh','--frame-height');
 const SC=g('scale')?'scaled':'';
 const set=(...c)=>{stage.className=[side,SC,...c].filter(Boolean).join(' ');};set();
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
@@ -152,7 +157,9 @@ function viewsText(value){
 }
 function fillCard(ev,user){
   const bc=clean(ev.broadcaster_name||ev.broadcaster),tt=String(ev.title||'').replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,90)||'Clip';
-  $('title').textContent=bc?bc+': '+tt:tt;const T=$('title');T.style.fontSize=T.textContent.length>44?'22px':T.textContent.length>34?'25px':'';
+  $('title').textContent=bc?bc+': '+tt:tt;const T=$('title');
+  const type=parseFloat(getComputedStyle(stage).getPropertyValue('--frame-font'))||1;
+  T.style.fontSize=T.textContent.length>44?(22*type)+'px':T.textContent.length>34?(25*type)+'px':'';
   $('creator').innerHTML=ev.creator?'clipped by <b>'+esc(clean(ev.creator))+'</b>':'';
   $('redeemer').innerHTML='redeemed by <b>'+esc(user)+'</b>';
   const th=String(ev.thumbnail_url||'');if(/^https:\/\//.test(th))$('thumb').src=th;else $('thumb').removeAttribute('src');
@@ -204,13 +211,22 @@ const queue=[];let busy=false;
 function present(ev){queue.push(ev);if(!busy)run();}
 // Play the clip. frameUp means the gold frame is already on screen (countdown just ended).
 // armed means the mp4 is paused on its first frame and only needs play().
+// away slides the orc off. The next alert adds "in", which walks him back.
+// classList keeps the gold frame's animation running. set() would rebuild
+// every class and could start that animation over.
+function parkOrc(extra){
+  stage.classList.remove('in','say','talking');
+  if(extra!=='isvid')stage.classList.remove('isvid');
+  stage.classList.add('clip','away');
+  if(extra)stage.classList.add(extra);
+}
 async function presentClip(ev,user,opts){opts=opts||{};
  const vsrc=videoUrl(ev.video_url),emb=(ev.embed_url||ev.clip_id||ev.clip_url)?embedUrl(ev):'';
  fillCard(ev,user);
  const f=$('clip');let shown=false;
  if(vsrc){
-  if(opts.frameUp)set('in','clip','isvid');
-  else{set('in','clip','isvid');await wait(750);}
+  if(!opts.frameUp){set('in','clip','isvid');await wait(750);}
+  parkOrc('isvid');
   window.orcClip.clipAt=performance.now();
   const r=opts.armed?await startHeldVideo(ev.duration):await playVideo(vsrc,ev.duration);
   window.orcClip.vresult=r;
@@ -221,13 +237,22 @@ async function presentClip(ev,user,opts){opts=opts||{};
   const dur=Math.min(MAXDUR,(+ev.duration>0?+ev.duration:30))+BUFFER;
   // Twitch refuses autoplay if the iframe was hidden, or if anything overlaps it.
   // The countdown is gone before we get here. A frame that just animated in still waits.
-  if(opts.frameUp){set('in','clip');await wait(100);}
-  else{set('in','clip');await wait(750);}
+  // A failed mp4 already slid him off. Do not walk him back in for the iframe.
+  // The wait before the iframe src is what Twitch needs for autoplay. Leave it.
+  if(!vsrc)set('in','clip');
+  await wait(opts.frameUp?100:750);
+  parkOrc();
   window.orcClip.clipAt=performance.now();
   f.src=emb;
   const bar=$('bar').firstElementChild;bar.style.transition='none';bar.style.width='0';void bar.offsetWidth;bar.style.transition='width '+dur+'s linear';bar.style.width='100%';
   await wait(dur*1000);shown=true;}
- if(shown){set('in','clipout'+(vsrc&&!String(f.src||'').includes('twitch')?' isvid':''));await wait(500);}
+ if(shown){
+  stage.classList.remove('in','say','talking','clip');
+  stage.classList.add('clipout','away');
+  if(vsrc&&!String(f.src||'').includes('twitch'))stage.classList.add('isvid');
+  else stage.classList.remove('isvid');
+  await wait(500);
+ }
  f.src='about:blank';$('thumb').removeAttribute('src');
 }
 async function run(){busy=true;
@@ -272,7 +297,9 @@ async function run(){busy=true;
   stopCountdown();
   if(hasClip)await presentClip(ev,user,{frameUp:!!(playedRanked&&hold),armed:!!(playedRanked&&armed)});
   else{set('in','say');await wait(800);}
-  set('out');await wait(850);set();await wait(400);
+  // popOut starts on screen. Skip it when he already slid off for the clip.
+  if(!stage.classList.contains('away')){set('out');await wait(850);}
+  set();await wait(400);
  }
  busy=false;}
 window.orcClip={present,queue,parents:PARENTS,embedUrl,videoUrl,findLine,rankText,viewsText};

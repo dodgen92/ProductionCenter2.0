@@ -16,17 +16,21 @@ Use the word `localhost` in the URL, not 127.0.0.1. Otherwise set `&parent=127.0
 |---|---|---|
 | server | http://localhost:5000 | Production Center (`0` = off) |
 | reward | Play a Clip | if the event carries `reward`, it must match (case-insensitive). Events without `reward` always fire |
-| side | left | `right` = clip frame on the left, orc on its right (both stay clear of the cam at x1240-1880, y600-960) |
-| vvol | 0.9 | voice line volume 0-1 |
+| side | left | `right` moves the orc to the right. The frame stays where the CSS variables put it, so it does not jump onto the webcam |
+| vvol | 0.9 | voice line volume 0-1. Not the clip |
+| cvol | 0.8 | clip `<video>` volume, 0 to 1. `CVOL` in `orc.js`. The Twitch iframe has no volume setting |
 | muted | 0 | `1` = start the clip muted |
 | parent | page hostname over http, else `localhost` | comma list allowed |
 | maxdur | 60 | cap in seconds on how long a clip is shown |
 | buffer | 5 | seconds added to `duration` for the embed to load and start |
 | scale | 1 | scale the whole layout |
+| framex, framey | 10, 10 | frame position in pixels. Same as `--frame-left` and `--frame-top` in `style.css` |
+| framew, frameh | 1450, 920 | frame size in pixels. Same as `--frame-width` and `--frame-height`. The video stays 16:9 inside that box |
 | test | | `1` = the old fake cycle (voice line `test/voice-test.mp3` plus a real public clip). `wow` or `twitch` previews one rank, for example `?test=wow&rank=3` or `?test=twitch&rank=1` (local test clip, 12,345 views). `&once=1` plays one. `&clip=SLUG` uses your own clip with `test=1` |
 
 ## Behaviour
-- A ranked line (see Voice lines) holds the clip on its first frame, or on the thumbnail if the file is not ready. A film countdown inside the clip window runs for that line's `voice_end_s` and hits 0 when the orc stops talking. Then the clip starts. The music tail fades out quickly so it does not sit on the clip audio. If the mp3 ends first, the clip starts then.
+- The server picks the clip from a shuffle bag (`clips_cache/shuffle.json`), one whole library, not separate WoW and Twitch bags. Nothing repeats until every downloaded file has played. A new download joins the current round. Delete `shuffle.json` to start over. `?test=` and `?rank=` are previews and do not use the bag.
+- A ranked line (see Voice lines) holds the clip on its first frame, or on the thumbnail if the file is not ready. A film countdown inside the clip window runs for that line's `voice_end_s` and hits 0 when the orc stops talking. Then the clip starts and the orc slides off toward the side he is standing on (`side=left` goes left and down, `side=right` goes right and down). The next clip walks him back in. The music tail fades out quickly so it does not sit on the clip audio. If the mp3 ends first, the clip starts then.
 - A clip with no matching line still waits until `voice_line` finishes (or a 20 s cap), then plays. That is the old path.
 - No voice line: the orc shows for about 1.4 s, then the clip plays.
 - No clip: the orc says "No clips in the vault yet" (with his voice line if there is one) and leaves.
@@ -49,13 +53,13 @@ If the rank has no line (11th WoW clip, a missing file, or an older library row 
 index.html, style.css, orc.js, lines.js, audio/ (the ranked mp3s), art/orc.png (cut out from the approved orc scholar with tools/cutout.py), test/voice-test.mp3 (test only), tools/ (cutout, mock server, headless tests).
 
 ## Music
-Music: 'Clarion' by Scott Buckley (CC BY 4.0)
+The bed under the voice is taiko / war drums: "Taiko Drum Sequence for Looping (The Sacrifice)" by Infinita08, Freesound id 459561 (CC0). The source file was named taiko_459561. Infinita08 notes the sequence was built from a free taiko sample library. https://freesound.org/people/Infinita08/sounds/459561/
 
 ## Clip channel name
 The header shows "CHANNEL: Title" (event field `broadcaster_name`, fallback `broadcaster`); just the title if missing. Long titles shrink, then ellipsize.
 
 ## Local clip videos (no more mute)
-If the event has `video_url` (e.g. `/clips/x.mp4`, resolved against `server`), the clip plays in a normal <video> with sound, then hides when it ends (safety cap = duration or real length + `buffer`, max `maxdur`). Params: `cvol` (clip volume 0-1, default 1), `muted=1` still mutes. If the file fails, it falls back to the Twitch iframe below.
+If the event has `video_url` (e.g. `/clips/x.mp4`, resolved against `server`), the clip plays in a normal <video> with sound, then hides when it ends (safety cap = duration or real length + `buffer`, max `maxdur`). Params: `cvol` (clip volume 0-1, default 0.8), `muted=1` still mutes. If the file fails, it falls back to the Twitch iframe below.
 
 ## Clip audio (iframe fallback only)
 Twitch clips only have an iframe embed (no JS player API: Twitch.Player accepts only channel/video/collection, and player.twitch.tv/?clip= errors). The embed asks for sound (`muted=false`), but Twitch's player mutes itself if the browser blocks sound autoplay. If clips play muted in OBS: right-click the source > Interact, click the clip once to unmute; that lasts for the OBS session. Also check the source isn't muted in OBS's Audio Mixer and "Control audio via OBS" is set how you want.

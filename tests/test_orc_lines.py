@@ -62,6 +62,10 @@ def test_voice_lines_match_ranks_and_audio_files():
         assert row["text"].strip()
         assert row["voice_end_s"] > row["voice_start_s"] >= 0
 
+    raw_text = LINES_JS.read_text(encoding="utf-8")
+    assert "Loqtar" not in raw_text
+    assert "Lok'tar" in raw_text
+
     listed = [row["file"] for row in lines["wow"] + lines["twitch"]]
     on_disk = {path.name for path in AUDIO.glob("*.mp3")}
     assert set(listed) == on_disk
@@ -91,7 +95,11 @@ def test_widgets_route_serves_an_orc_line(client, monkeypatch):
 
 
 def test_readme_credits_the_music_bed():
-    """The widget README names the music under the voice lines."""
+    """The widget README names the drums under the voice lines, not Clarion."""
 
     text = README.read_text(encoding="utf-8")
-    assert "Music: 'Clarion' by Scott Buckley (CC BY 4.0)" in text
+    assert "Clarion" not in text
+    assert "Scott Buckley" not in text
+    assert "Infinita08" in text
+    assert "459561" in text
+    assert "CC0" in text
