@@ -1,12 +1,12 @@
 # Fact Gnome: "Gnome Fact" channel point reward
 
-A painted gnome scholar (pink pigtails, teal coat, glowing tome) pops up in an arcane puff, reads a random WoW fact (trivia, dev easter eggs, player legends, all in her sassy voice) out loud while it types into her speech bubble, then hops away. Redemptions queue and play one after another. Facts come from a local list, so there are no AI calls. Her voice is LIVE neural TTS from the Production Center's `/tts` route (free `edge-tts`, no key); if that's down she falls back to a Windows voice within ~4s.
+A painted gnome scholar (pink pigtails, teal coat, glowing tome) pops up in an arcane puff, reads a random WoW fact (trivia, dev easter eggs, player legends, all in her sassy voice) out loud while it types into her speech bubble, then hops away. Redemptions queue and play one after another. Facts come from a local list, so there are no AI calls. Her voice is a pre-recorded Kokoro line when `voice/voices.js` has that fact. If it does not, she uses live neural TTS from the Production Center's `/tts` route (free `edge-tts`, no key), then a Windows voice within ~4s.
 
 ## OBS setup
 1. Add a **Browser Source**, untick "Local file", URL
-   `file:///C:/Users/tyler/Desktop/Stream-Widgets/fact-gnome/index.html?channel=remyfriend&reward=Gnome%20Fact`
+   `http://localhost:5000/widgets/fact-gnome/index.html?channel=remyfriend&reward=Gnome%20Fact`
 2. Width 1920, height 1080; keep the default transparent CSS. Tick "Control audio via OBS" to put her voice in the mixer.
-3. Preview anytime with `&test=1` (a fake redemption every 12s, no network).
+3. Preview with `&test=1` (a fake redemption every 12s). The Production Center has to be running. The page, `voice/voices.js`, and the mp3s are all served from `/widgets/`. A `file://` page cannot fetch those mp3s, so she would fall through to live TTS.
 
 ## How she gets triggered
 1. **Production Center (main way):** she polls `http://localhost:5000/events` on the existing Flask `Server.py` and fires on any `redemption` event whose reward title matches `?reward=` (case-insensitive). This catches every redemption, with or without viewer text. The backend change is described in `PRODUCTION-CENTER-SPEC.md`.
@@ -28,10 +28,18 @@ A painted gnome scholar (pink pigtails, teal coat, glowing tome) pops up in an a
 | `livetts` | on | `0` = skip the server, use the Windows voice only |
 | `vol` | 1 | Voice volume (0–1) |
 | `tts` | on | `0` = silent, text only |
+| `prerec` | on | `0` = skip the recorded lines and use live `/tts` |
 | `pos` | br | `br`, `bl`, `tr`, `tl` |
 | `scale` | 1 | Size multiplier |
 | `duration` | 12 | Minimum seconds on screen per fact (min 6) |
 | `test` / `once` | off | `test=1` fake redemptions; `once=1` only one |
+
+## Recorded lines
+`voice/voices.js` maps each exact string in `facts/facts.js` to a file under `voice/`. The shipped lines are Ed's Kokoro takes (voice `af_nicole`, sped up and pitched): `gnome_01.mp3` through `gnome_25.mp3`, one per fact, in that order. They sit around -21.5 LUFS. Leave them at that level. The widget does not turn them up.
+
+The key has to match the fact character for character, or that line never plays and she falls through to `/tts`. To swap one line, replace the mp3 (keeping the same name is fine) or point the existing key at a new path. Do not change the key text, and do not edit the fact in `facts.js` to match an old recording. To rebuild every line on this PC, run `python widgets/fact-gnome/tools/make_gnome_voices.py` (see the project README). That writes hash-named wavs and replaces `voices.js`. Those wavs are gitignored. The mp3s stay in the folder, but she only plays files the manifest names. Copy `voices.js` aside before a rebuild if you still want the shipped mp3s.
+
+Fact 2's recording says "can't finish a quest chain". `facts.js` says "can't even finish". The manifest key is the `facts.js` line, so the bubble has "even" and the audio does not.
 
 ## Facts
 Edit `facts/facts.js` in Notepad (instructions at the top). Facts are shuffled and she won't repeat one until she's used them all. The remaining round is saved in the browser under `gnome_deck_v1`, so an OBS refresh does not start the list over. A new fact is added to the round in progress. `?test=1` does not use that saved list. To start over, open the page once with `?resetdeck=1`.

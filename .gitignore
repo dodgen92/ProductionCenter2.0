@@ -33,8 +33,11 @@ voice_lines/orc/*
 !voice_lines/orc/.gitkeep
 !voice_lines/orc/README.md
 
-# Generated Fact Gnome lines (Kokoro wavs and voice/voices.js). Stay on this PC.
-widgets/fact-gnome/voice/
+# Generated Fact Gnome wavs from make_gnome_voices.py stay on this PC.
+# Shipped lines (voice/voices.js and gnome_01.mp3–gnome_25.mp3) are tracked.
+widgets/fact-gnome/voice/*
+!widgets/fact-gnome/voice/voices.js
+!widgets/fact-gnome/voice/*.mp3
 
 # Local test notes. Do not commit.
 tests.txt

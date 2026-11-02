@@ -323,3 +323,46 @@ def test_misaki_g2p_accepts_spoken_markup():
                 assert mark in result
     assert saw_phoneme
     assert saw_stress
+
+
+def test_shipped_voices_keys_match_facts_and_files_exist():
+    """Every voices.js key is a facts.js line, and every referenced mp3 is on disk.
+
+    Keys are the on-screen fact strings. A mismatch means that line never plays.
+    """
+
+    facts = m.read_facts()
+    root = Path(__file__).resolve().parents[1] / "widgets" / "fact-gnome"
+    js = (root / "voice" / "voices.js").read_text(encoding="utf-8")
+    mapping = json.loads(re.search(r"= (\{.*\});", js, re.S).group(1))
+    assert list(mapping) == facts
+    for index, fact in enumerate(facts, 1):
+        rel = mapping[fact]
+        assert rel == f"voice/gnome_{index:02d}.mp3"
+        path = root / rel
+        assert path.is_file()
+        assert path.stat().st_size > 1000
+
+
+def test_widgets_route_serves_shipped_gnome_voice(monkeypatch):
+    """GET /widgets/fact-gnome/voice/voices.js and a shipped mp3 both load."""
+
+    import Server
+
+    monkeypatch.delenv("WIDGETS_DIR", raising=False)
+    Server.app.config["TESTING"] = True
+    client = Server.app.test_client()
+    page = client.get("/widgets/fact-gnome/index.html")
+    manifest = client.get("/widgets/fact-gnome/voice/voices.js")
+    audio = client.get("/widgets/fact-gnome/voice/gnome_01.mp3")
+    assert page.status_code == 200
+    assert b"voice/voices.js" in page.data
+    assert manifest.status_code == 200
+    assert manifest.mimetype in {"text/javascript", "application/javascript"}
+    assert b"GNOME_VOICES" in manifest.data
+    assert b"voice/gnome_01.mp3" in manifest.data
+    assert audio.status_code == 200
+    assert audio.mimetype == "audio/mpeg"
+    assert audio.headers["Cache-Control"] == "no-store"
+    assert len(audio.data) > 1000
+    assert audio.data.startswith(b"ID3") or audio.data[0] == 0xFF
