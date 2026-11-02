@@ -382,6 +382,9 @@ def build_clip_library(token, folder, now=None):
                     pass
             continue
         entries.append(index_entry(clip, filename))
+        # Save the index as each file finishes. A redeem can play one of
+        # these while the rest are still downloading.
+        write_clip_index(folder, entries)
     write_clip_index(folder, entries)
     return entries
 

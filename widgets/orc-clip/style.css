@@ -44,6 +44,11 @@ html,body{margin:0;background:transparent;width:1920px;height:1080px;overflow:hi
 .out #orc{animation:popOut .8s ease-in forwards}.right.out #orc{animation-name:popOutR}
 @keyframes popOut{0%{opacity:1;transform:none}100%{opacity:1;transform:translate(-700px,0) rotate(-6deg)}}
 @keyframes popOutR{0%{opacity:1;transform:none}100%{opacity:1;transform:translate(1300px,0) rotate(6deg)}}
+/* Clip started: slide off the side he stands on. The next alert's .in walks him back. */
+.away #orc{transform:none;animation:slideOff .75s ease-in forwards}
+.right.away #orc{animation-name:slideOffR}
+@keyframes slideOff{from{opacity:1;transform:none}to{opacity:1;transform:translate(-700px,160px) rotate(-6deg)}}
+@keyframes slideOffR{from{opacity:1;transform:none}to{opacity:1;transform:translate(1300px,160px) rotate(6deg)}}
 .talking #sway{animation:sway 1s ease-in-out infinite}
 @keyframes sway{0%,100%{transform:rotate(0) translateY(0)}25%{transform:rotate(-3deg) translateY(-8px)}50%{transform:rotate(0)}75%{transform:rotate(3deg) translateY(-8px)}}
 .in:not(.talking) #sway{animation:idle 3s ease-in-out infinite}

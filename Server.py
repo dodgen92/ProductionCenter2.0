@@ -477,10 +477,19 @@ def clip_event_fields(clip):
     return fields
 
 
+# True from the moment startup starts deleting old clips until the new
+# index is finished. A redeem in that window must not point at a missing mp4.
+_clips_downloading = False
+
+
 def play_clip_for(user, login, reward=""):
     """Publish a clip event. Prefer a downloaded mp4. Otherwise ask Helix."""
 
     clip = pick_local_clip()
+    if clip is None and _clips_downloading:
+        # None of the mp4s are ready yet. The embed fallback below leaves
+        # video_url blank, so the widget does not try to play a missing file.
+        print("[Server] clip not downloaded yet")
     if clip is None:
         try:
             clip = fetch_random_clip()
@@ -613,10 +622,14 @@ def clear_clip_cache():
 def refresh_clip_library():
     """Rebuild clips_cache. Meant to run in a background thread so startup is not blocked.
 
-    Until this finishes, Play a Clip uses the Helix embed fallback.
+    Until the first mp4 is saved, Play a Clip uses the Helix embed fallback.
+    After that, a redeem can play a file that is already on disk.
     """
 
+    global _clips_downloading
     print("[Server] Clip library: clearing old files.")
+    entries = []
+    _clips_downloading = True
     try:
         clear_clip_cache()
         token = clips.get_app_token()
@@ -625,6 +638,8 @@ def refresh_clip_library():
         # Do not print the exception text. A token failure can include the URL.
         print(f"[Server] WARNING: clip library failed ({type(exc).__name__}).")
         entries = []
+    finally:
+        _clips_downloading = False
     print(f"[Server] downloaded {len(entries)} clips")
 
 

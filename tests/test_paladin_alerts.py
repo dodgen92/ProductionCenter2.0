@@ -17,6 +17,7 @@ import Server
 
 ROOT = Path(__file__).resolve().parents[1]
 LINES_JS = ROOT / "widgets" / "paladin-sub" / "lines.js"
+PALADIN_JS = ROOT / "widgets" / "paladin-sub" / "paladin.js"
 AUDIO = ROOT / "widgets" / "paladin-sub" / "audio"
 
 
@@ -73,6 +74,18 @@ def test_voice_lines_match_the_audio_files():
     on_disk = {path.name for path in AUDIO.glob("*.mp3")}
     assert set(listed) == on_disk
     assert len(listed) == len(set(listed))
+
+
+def test_voice_line_still_starts_the_background_bed():
+    """A voice line must not skip the mp3 in sounds/. That bed plays under the voice."""
+
+    # Proves: the recorded line and the older bed both start. Follows stay
+    # without the bed, and the bed is a fraction of the voice volume.
+
+    text = PALADIN_JS.read_text(encoding="utf-8")
+    assert "if(line)voice=playVoice(line);" in text
+    assert "if(!fol)playSound(!!line);" in text
+    assert "const BED=0.35;" in text
 
 
 def test_widgets_route_serves_a_paladin_line(client, monkeypatch):

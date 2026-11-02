@@ -204,13 +204,22 @@ const queue=[];let busy=false;
 function present(ev){queue.push(ev);if(!busy)run();}
 // Play the clip. frameUp means the gold frame is already on screen (countdown just ended).
 // armed means the mp4 is paused on its first frame and only needs play().
+// away slides the orc off. The next alert adds "in", which walks him back.
+// classList keeps the gold frame's animation running. set() would rebuild
+// every class and could start that animation over.
+function parkOrc(extra){
+  stage.classList.remove('in','say','talking');
+  if(extra!=='isvid')stage.classList.remove('isvid');
+  stage.classList.add('clip','away');
+  if(extra)stage.classList.add(extra);
+}
 async function presentClip(ev,user,opts){opts=opts||{};
  const vsrc=videoUrl(ev.video_url),emb=(ev.embed_url||ev.clip_id||ev.clip_url)?embedUrl(ev):'';
  fillCard(ev,user);
  const f=$('clip');let shown=false;
  if(vsrc){
-  if(opts.frameUp)set('in','clip','isvid');
-  else{set('in','clip','isvid');await wait(750);}
+  if(!opts.frameUp){set('in','clip','isvid');await wait(750);}
+  parkOrc('isvid');
   window.orcClip.clipAt=performance.now();
   const r=opts.armed?await startHeldVideo(ev.duration):await playVideo(vsrc,ev.duration);
   window.orcClip.vresult=r;
@@ -221,13 +230,22 @@ async function presentClip(ev,user,opts){opts=opts||{};
   const dur=Math.min(MAXDUR,(+ev.duration>0?+ev.duration:30))+BUFFER;
   // Twitch refuses autoplay if the iframe was hidden, or if anything overlaps it.
   // The countdown is gone before we get here. A frame that just animated in still waits.
-  if(opts.frameUp){set('in','clip');await wait(100);}
-  else{set('in','clip');await wait(750);}
+  // A failed mp4 already slid him off. Do not walk him back in for the iframe.
+  // The wait before the iframe src is what Twitch needs for autoplay. Leave it.
+  if(!vsrc)set('in','clip');
+  await wait(opts.frameUp?100:750);
+  parkOrc();
   window.orcClip.clipAt=performance.now();
   f.src=emb;
   const bar=$('bar').firstElementChild;bar.style.transition='none';bar.style.width='0';void bar.offsetWidth;bar.style.transition='width '+dur+'s linear';bar.style.width='100%';
   await wait(dur*1000);shown=true;}
- if(shown){set('in','clipout'+(vsrc&&!String(f.src||'').includes('twitch')?' isvid':''));await wait(500);}
+ if(shown){
+  stage.classList.remove('in','say','talking','clip');
+  stage.classList.add('clipout','away');
+  if(vsrc&&!String(f.src||'').includes('twitch'))stage.classList.add('isvid');
+  else stage.classList.remove('isvid');
+  await wait(500);
+ }
  f.src='about:blank';$('thumb').removeAttribute('src');
 }
 async function run(){busy=true;
@@ -272,7 +290,9 @@ async function run(){busy=true;
   stopCountdown();
   if(hasClip)await presentClip(ev,user,{frameUp:!!(playedRanked&&hold),armed:!!(playedRanked&&armed)});
   else{set('in','say');await wait(800);}
-  set('out');await wait(850);set();await wait(400);
+  // popOut starts on screen. Skip it when he already slid off for the clip.
+  if(!stage.classList.contains('away')){set('out');await wait(850);}
+  set();await wait(400);
  }
  busy=false;}
 window.orcClip={present,queue,parents:PARENTS,embedUrl,videoUrl,findLine,rankText,viewsText};

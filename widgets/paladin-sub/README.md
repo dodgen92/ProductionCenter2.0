@@ -24,9 +24,11 @@ Edit the wording in `lines.js` (open it in Notepad). Change `text`. Leave `file`
 
 The bubble and the line stay up until the mp3 ends (`ended`). If the file fails to load, he gives up after about 6 seconds so the next alert is not stuck. There is also a 90 second cap if a clip starts and never ends. Alerts that arrive while he is talking wait. They do not play on top of each other.
 
-`?sound=0` mutes the mp3. The line text still shows, for the normal alert time. `?vol=` is the volume, 0 to 1, default 0.8. In OBS, tick **Control audio via OBS** so the voice shows up in your mixer.
+`?sound=0` mutes the voice and the bed. The line text still shows, for the normal alert time. `?vol=` is the voice volume, 0 to 1, default 0.8. The bed plays at about a third of that, so the words stay on top. In OBS, tick **Control audio via OBS** so both show up in the mixer.
 
-`sounds/sounds.js` is only a fallback for an alert that has no voice line. Follows with no follow line stay silent. Leave that list empty.
+On a sub, resub, gift, bits, or raid, a random mp3 from `sounds/` plays under the voice line. That is the same bed the widget played before the recorded lines. A follow does not play it. If an alert has no voice line, the bed plays at full `?vol=` instead. A follow with no line stays silent.
+
+List those files in `sounds/sounds.js`. Leave the list empty to use `sounds/1.mp3`, `sounds/2.mp3`, and so on, up to 50.
 
 ## Preview without Twitch
 `?test=1` cycles a sub, a 14-month resub, a 5-gift, a raid, 500 bits, and a follow, one every 9 seconds. They queue if a voice line is still playing.
@@ -71,8 +73,8 @@ The server already subscribes to follows (`channel.follow` v2, scope `moderator:
 | `duration` | 6 | Seconds per alert (min 4) |
 | `test` | off | `1` cycles sub, resub, gift, raid, bits, and follow every 9s. Or `test=follow` / `sub` / `resub` / `gift` / `bits` / `cheer` / `raid` for one type |
 | `once` | off | With `test=1`, play one alert only |
-| `vol` | 0.8 | Sound volume, 0 to 1 |
-| `sound` | on | `0` = mute the sounds |
+| `vol` | 0.8 | Voice volume, 0 to 1. The bed is about a third of this |
+| `sound` | on | `0` = mute the voice and the bed |
 | `follows` | on | `0` = no follow alerts |
 | `followdur` | 3.5 | Seconds per follow alert |
 | `server` | http://localhost:5000 | Production Center URL; `0` = off (test mode skips it unless set) |

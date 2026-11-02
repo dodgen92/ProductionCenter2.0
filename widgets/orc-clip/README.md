@@ -26,7 +26,7 @@ Use the word `localhost` in the URL, not 127.0.0.1. Otherwise set `&parent=127.0
 | test | | `1` = the old fake cycle (voice line `test/voice-test.mp3` plus a real public clip). `wow` or `twitch` previews one rank, for example `?test=wow&rank=3` or `?test=twitch&rank=1` (local test clip, 12,345 views). `&once=1` plays one. `&clip=SLUG` uses your own clip with `test=1` |
 
 ## Behaviour
-- A ranked line (see Voice lines) holds the clip on its first frame, or on the thumbnail if the file is not ready. A film countdown inside the clip window runs for that line's `voice_end_s` and hits 0 when the orc stops talking. Then the clip starts. The music tail fades out quickly so it does not sit on the clip audio. If the mp3 ends first, the clip starts then.
+- A ranked line (see Voice lines) holds the clip on its first frame, or on the thumbnail if the file is not ready. A film countdown inside the clip window runs for that line's `voice_end_s` and hits 0 when the orc stops talking. Then the clip starts and the orc slides off toward the side he is standing on (`side=left` goes left and down, `side=right` goes right and down). The next clip walks him back in. The music tail fades out quickly so it does not sit on the clip audio. If the mp3 ends first, the clip starts then.
 - A clip with no matching line still waits until `voice_line` finishes (or a 20 s cap), then plays. That is the old path.
 - No voice line: the orc shows for about 1.4 s, then the clip plays.
 - No clip: the orc says "No clips in the vault yet" (with his voice line if there is one) and leaves.
@@ -49,7 +49,7 @@ If the rank has no line (11th WoW clip, a missing file, or an older library row 
 index.html, style.css, orc.js, lines.js, audio/ (the ranked mp3s), art/orc.png (cut out from the approved orc scholar with tools/cutout.py), test/voice-test.mp3 (test only), tools/ (cutout, mock server, headless tests).
 
 ## Music
-Music: 'Clarion' by Scott Buckley (CC BY 4.0)
+The bed under the voice is taiko / war drums: "Taiko Drum Sequence for Looping (The Sacrifice)" by Infinita08, Freesound id 459561 (CC0). The source file was named taiko_459561. Infinita08 notes the sequence was built from a free taiko sample library. https://freesound.org/people/Infinita08/sounds/459561/
 
 ## Clip channel name
 The header shows "CHANNEL: Title" (event field `broadcaster_name`, fallback `broadcaster`); just the title if missing. Long titles shrink, then ellipsize.

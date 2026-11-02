@@ -91,7 +91,11 @@ def test_widgets_route_serves_an_orc_line(client, monkeypatch):
 
 
 def test_readme_credits_the_music_bed():
-    """The widget README names the music under the voice lines."""
+    """The widget README names the drums under the voice lines, not Clarion."""
 
     text = README.read_text(encoding="utf-8")
-    assert "Music: 'Clarion' by Scott Buckley (CC BY 4.0)" in text
+    assert "Clarion" not in text
+    assert "Scott Buckley" not in text
+    assert "Infinita08" in text
+    assert "459561" in text
+    assert "CC0" in text

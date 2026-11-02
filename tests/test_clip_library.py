@@ -75,6 +75,7 @@ def clean_clip_state(monkeypatch, tmp_path):
     Server.EVENT_ID = 0
     Server.EVENTS.clear()
     Server._last_voice_line = None
+    Server._clips_downloading = False
     monkeypatch.setattr(Server, "CLIPS_DIR", tmp_path / "clips_cache")
     monkeypatch.setattr(Server, "VOICE_LINES_DIR", tmp_path / "voice_lines")
     monkeypatch.delenv("BROADCASTER_USER_ID", raising=False)
@@ -382,6 +383,83 @@ def test_play_a_clip_falls_back_to_embed_when_library_is_empty(monkeypatch, tmp_
     assert event["source"] == "wow"
     assert event["rank"] == 1
     assert "view_count" not in event
+
+
+def test_play_a_clip_logs_when_the_file_is_not_downloaded_yet(capsys, monkeypatch):
+    """A redeem during the download, before any mp4 is saved, says so and uses the embed."""
+
+    # Proves: we do not hand the widget a video_url for a file that is not
+    # on disk yet. The log line is the one to look for in the server window.
+
+    Server._clips_downloading = True
+
+    def fake_token():
+        return "app-token"
+
+    def fake_wow_clips(token, hours=200, now=None):
+        return [{
+            "id": "ClipId",
+            "url": "https://clips.twitch.tv/ClipId",
+            "embed_url": "https://clips.twitch.tv/embed?clip=ClipId",
+            "title": "Big pull",
+            "creator_name": "Someone",
+            "broadcaster_name": "SomeChannel",
+            "duration": 8,
+            "thumbnail_url": "https://example.test/thumb.jpg",
+        }]
+
+    monkeypatch.setattr(Server.clips, "get_app_token", fake_token)
+    monkeypatch.setattr(Server.clips, "get_top_wow_clips", fake_wow_clips)
+
+    # Act
+    Server.play_clip_for("RemyFriend", "remyfriend", "Play a Clip")
+
+    # Assert
+    assert "[Server] clip not downloaded yet" in capsys.readouterr().out
+    event = Server.EVENTS[0]
+    assert event["video_url"] == ""
+    assert event["embed_url"] == "https://clips.twitch.tv/embed?clip=ClipId"
+
+
+def test_play_a_clip_uses_a_finished_file_while_download_continues(capsys, monkeypatch):
+    """Once one mp4 is saved, a redeem plays that file instead of waiting."""
+
+    # Proves: the index can hold finished files while _clips_downloading is
+    # still true. Those files are used, and the "not downloaded yet" line
+    # is not printed.
+
+    folder = Server.CLIPS_DIR
+    folder.mkdir()
+    (folder / "ClipId.mp4").write_bytes(b"not really a video")
+    entry = {
+        "file": "ClipId.mp4",
+        "clip_id": "ClipId",
+        "url": "https://clips.twitch.tv/ClipId",
+        "embed_url": "https://clips.twitch.tv/embed?clip=ClipId",
+        "title": "Big pull",
+        "broadcaster_name": "Durotan_Live",
+        "creator": "Peonwork",
+        "duration": 12.5,
+        "view_count": 99,
+        "source": "twitch",
+        "rank": 2,
+        "thumbnail_url": "https://example.test/thumb.jpg",
+    }
+    (folder / "index.json").write_text(json.dumps([entry]), encoding="utf-8")
+    Server._clips_downloading = True
+
+    def fail_token():
+        raise AssertionError("a saved clip must not ask Twitch for a token")
+
+    monkeypatch.setattr(Server.clips, "get_app_token", fail_token)
+
+    # Act
+    Server.play_clip_for("RemyFriend", "remyfriend", "Play a Clip")
+
+    # Assert
+    assert "[Server] clip not downloaded yet" not in capsys.readouterr().out
+    assert Server.EVENTS[0]["video_url"] == "/clips/ClipId.mp4"
+    assert Server.EVENTS[0]["embed_url"] == "https://clips.twitch.tv/embed?clip=ClipId"
 
 
 def test_clips_route_supports_range_and_rejects_traversal(client, tmp_path):
