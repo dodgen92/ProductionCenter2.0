@@ -152,7 +152,7 @@ def test_preview_layout_matches_the_overlay_sample():
         "1. Ask chat what the longest walk they've ever done in WoW was, and whether it was worth it.\n"
         "2. Do a Remy bit: a Forsaken paladin grumbling that he still has to walk everywhere.\n"
         "3. Tell the backstory of this trip: what's waiting at Bandarion Keep, and what happened last time?\n"
-        "4. If it fits, share one well-known Forsaken or Light detail you are sure of, and skip it if you would be guessing.\n"
+        "4. No lore or development note was available for this one.\n"
         "\n"
         "━━━━━━━━━━\n"
         "**💬 CHAT (last 3 min)**\n"
@@ -180,21 +180,73 @@ def test_empty_chat_says_no_new_chats():
 
 
 def test_fourth_point_stays_inside_talking_points():
-    """Item 4 is another talking point. Three model points are not enough."""
+    """Four model points stay. Three are kept, and only the missing fourth is filled."""
 
-    short = {"points": ["One.", "Two.", "Three."]}
-    canned, _, source = lull.normalize(short, [])
-    assert source == "canned"
-    assert canned == list(lull.CANNED_POINTS)
+    short, _, source = lull.normalize({"points": ["One.", "Two.", "Three."]}, [])
+    assert source == "partial"
+    assert short[:3] == ["One.", "Two.", "Three."]
+    assert short[3] == lull.LORE_UNAVAILABLE
     kept, _, source = lull.normalize(
-        {"points": ["One.", "Two.", "Three.", "A well-known lore beat, if you are sure."]},
+        {"points": ["One.", "Two.", "Three.", "The Light once raised this order, if that telling is the one you trust."]},
         [],
     )
     assert source == "gemini"
     assert len(kept) == 4
     message = lull.format_dm(kept, [])
-    assert "\n4. A well-known lore beat, if you are sure." in message
+    assert "\n4. The Light once raised this order, if that telling is the one you trust." in message
     assert message.index("\n4. ") < message.index("**💬 CHAT")
+
+
+def test_partial_points_keep_coaching_and_do_not_log_the_utterance(monkeypatch, usage_file, capsys):
+    """Three points stay. A blank fourth is unavailable. Bad JSON stays canned."""
+
+    arm(monkeypatch, usage_file)
+    phrase = "secret utterance about the ridge"
+    three = [
+        "Ask what they are farming tonight.",
+        "Do a Remy bit about the road.",
+        "Say where this character walks next.",
+    ]
+    calls = install_http(monkeypatch, good_model_payload(points=three))
+    missing = lull.trigger(origin="route", speech=phrase)
+    assert missing["source"] == "partial"
+    assert len(gemini_calls(calls)) == 1
+    content = discord_messages(calls)[0]["json"]["content"]
+    for line in three:
+        assert line in content
+    assert lull.LORE_UNAVAILABLE in content
+    assert "Add one well-known" not in content
+
+    lull.gate.reset()
+    calls = install_http(monkeypatch, good_model_payload(points=three + ["   "]))
+    blank = lull.trigger(origin="route", speech=phrase)
+    assert blank["source"] == "partial"
+    assert len(gemini_calls(calls)) == 1
+    blank_body = discord_messages(calls)[0]["json"]["content"]
+    assert three[0] in blank_body
+    assert lull.LORE_UNAVAILABLE in blank_body
+
+    lull.gate.reset()
+    lore = "Undead paladins are a known oddity in the Light's story."
+    calls = install_http(monkeypatch, good_model_payload(points=three + [lore]))
+    full = lull.trigger(origin="route", speech=phrase)
+    assert full["source"] == "gemini"
+    assert lore in discord_messages(calls)[0]["json"]["content"]
+    assert len(gemini_calls(calls)) == 1
+
+    lull.gate.reset()
+    calls = install_http(monkeypatch, model_payload='{"points":["' + phrase)
+    broken = lull.trigger(origin="route", speech=phrase)
+    assert broken["source"] == "canned"
+    assert len(gemini_calls(calls)) == 1
+    canned_body = discord_messages(calls)[0]["json"]["content"]
+    assert lull.CANNED_POINTS[0] in canned_body
+    assert phrase not in canned_body
+    logged = capsys.readouterr().out
+    assert "why=point-count n=3" in logged
+    assert "why=parse" in logged
+    assert phrase not in logged
+    assert GEMINI_KEY not in logged
 
 
 def test_chat_window_and_memory_cap(clock):
@@ -422,20 +474,24 @@ def test_untrusted_text_cannot_change_recipient_or_ping(clock, monkeypatch, usag
     assert "say @here" not in logged
 
 
-def test_daily_cap_blocks_a_second_gemini_call(clock, monkeypatch, usage_file):
+def test_daily_cap_blocks_a_second_gemini_call(clock, monkeypatch, usage_file, capsys):
     """The local lull cap stops the second call. It is not a promise about Google."""
 
     arm(monkeypatch, usage_file)
     monkeypatch.setenv("LULL_DAILY_CAP", "1")
     calls = install_http(monkeypatch)
     clock.now = 8000
-    first = lull.trigger(origin="route")
+    first = lull.trigger(origin="route", speech="secret ridge line")
     clock.now += 30
-    second = lull.trigger(origin="route")
+    second = lull.trigger(origin="route", speech="secret ridge line")
     assert first["source"] == "gemini"
     assert second["source"] == "canned"
     assert len(gemini_calls(calls)) == 1
     assert len(discord_messages(calls)) == 2
+    logged = capsys.readouterr().out
+    assert "why=cap" in logged
+    assert "secret ridge line" not in logged
+    assert GEMINI_KEY not in logged
 
 
 def test_discord_length_stays_under_the_limit():

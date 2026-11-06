@@ -33,12 +33,14 @@ DISCORD_API = "https://discord.com/api/v10"
 
 # Used when Gemini is missing, capped, rate-limited, or returns junk.
 # Generic WoW coaching. These are not claims about Tyler's life or about Blizzard.
+# The fourth line is only an honest gap. It is not a lore fact.
 POINT_COUNT = 4
+LORE_UNAVAILABLE = "No lore or development note was available for this one."
 CANNED_POINTS = (
     "Ask chat what they are questing or farming tonight, and leave room for them to answer.",
     "Do a Remy bit: the Forsaken paladin grumbles about some ordinary road inconvenience, then keeps walking.",
     "Tell chat what this character is heading toward next, in your own words, without inventing a past you have not mentioned.",
-    "Add one well-known WoW lore beat or development note that fits this topic, and say so if you are not sure of the detail.",
+    LORE_UNAVAILABLE,
 )
 GENERIC_COACHING = (
     "Answer them in a full sentence, in Remy's voice, then tie it back to what you were just doing."
@@ -50,7 +52,7 @@ SAMPLE_POINTS = (
     "Ask chat what the longest walk they've ever done in WoW was, and whether it was worth it.",
     "Do a Remy bit: a Forsaken paladin grumbling that he still has to walk everywhere.",
     "Tell the backstory of this trip: what's waiting at Bandarion Keep, and what happened last time?",
-    "If it fits, share one well-known Forsaken or Light detail you are sure of, and skip it if you would be guessing.",
+    LORE_UNAVAILABLE,
 )
 SAMPLE_CHATS = (
     {
@@ -371,27 +373,67 @@ def parse_model_json(text):
     return data
 
 
+def _usable_points(raw):
+    """Non-empty strings, in order, at most four. Blanks are skipped."""
+
+    found = []
+    if not isinstance(raw, list):
+        return found
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        text = _collapse(item, 400)
+        if not text:
+            continue
+        found.append(text)
+        if len(found) == POINT_COUNT:
+            break
+    return found
+
+
+def _fallback_why(reason):
+    return {
+        "missing-key": "no-key",
+        "cap": "cap",
+        "malformed": "no-text",
+        "error": "error",
+        "rate-limit": "rate-limit",
+    }.get(reason or "", "error")
+
+
+def _log_fallback(why, n=None):
+    """A reason word only. No speech, chat, key, or model body."""
+
+    if n is None:
+        print(f"[Lull] Gemini fallback why={why}")
+    else:
+        print(f"[Lull] Gemini fallback why={why} n={n}")
+
+
 def normalize(data, chats):
-    """Keep 4 points and our own chat rows. Extra model keys are ignored.
+    """Keep usable coaching lines. A missing fourth is marked unavailable.
 
     The model cannot choose the Discord recipient. Usernames come from the
-    chat buffer, not from the model.
+    chat buffer, not from the model. Fewer or more than four strings does not
+    throw away the strings that did arrive.
     """
 
     recent = list(chats)[:CHAT_OUTPUT_MAX]
-    points = []
-    raw_points = data.get("points") if isinstance(data, dict) else None
-    if isinstance(raw_points, list):
-        for item in raw_points:
-            if isinstance(item, str):
-                text = _collapse(item, 400)
-                if text:
-                    points.append(text)
-    if len(points) != POINT_COUNT:
+    found = _usable_points(data.get("points") if isinstance(data, dict) else None)
+    if not found:
         points = list(CANNED_POINTS)
         source = "canned"
-    else:
+        _log_fallback("point-count", 0)
+    elif len(found) >= POINT_COUNT:
+        points = found[:POINT_COUNT]
         source = "gemini"
+    else:
+        points = list(found)
+        while len(points) < POINT_COUNT - 1:
+            points.append(CANNED_POINTS[len(points)])
+        points.append(LORE_UNAVAILABLE)
+        source = "partial"
+        _log_fallback("point-count", len(found))
 
     raw_chats = data.get("chats") if isinstance(data, dict) else None
     if not isinstance(raw_chats, list):
@@ -531,9 +573,11 @@ def ask_gemini(speech, chats):
 def compose(speech, chats):
     raw, reason = ask_gemini(speech, chats)
     if raw is None:
+        _log_fallback(_fallback_why(reason))
         return list(CANNED_POINTS), generic_coaching(chats), "canned"
     data = parse_model_json(raw)
     if data is None:
+        _log_fallback("parse")
         return list(CANNED_POINTS), generic_coaching(chats), "canned"
     points, coached, source = normalize(data, chats)
     return points, coached, source
@@ -635,6 +679,7 @@ def trigger(origin="route", speech=""):
             coached = generic_coaching(chats)
             source = "canned"
             print("[Lull] No speech captured. Gemini was not called.")
+            _log_fallback("no-speech")
         else:
             points, coached, source = compose(utterance, chats)
         message = format_dm(points, coached)
