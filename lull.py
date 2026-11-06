@@ -32,11 +32,13 @@ DISCORD_LIMIT = 1800
 DISCORD_API = "https://discord.com/api/v10"
 
 # Used when Gemini is missing, capped, rate-limited, or returns junk.
-# Generic WoW coaching. These are not claims about Tyler's life.
+# Generic WoW coaching. These are not claims about Tyler's life or about Blizzard.
+POINT_COUNT = 4
 CANNED_POINTS = (
     "Ask chat what they are questing or farming tonight, and leave room for them to answer.",
     "Do a Remy bit: the Forsaken paladin grumbles about some ordinary road inconvenience, then keeps walking.",
     "Tell chat what this character is heading toward next, in your own words, without inventing a past you have not mentioned.",
+    "Add one well-known WoW lore beat or development note that fits this topic, and say so if you are not sure of the detail.",
 )
 GENERIC_COACHING = (
     "Answer them in a full sentence, in Remy's voice, then tie it back to what you were just doing."
@@ -48,6 +50,7 @@ SAMPLE_POINTS = (
     "Ask chat what the longest walk they've ever done in WoW was, and whether it was worth it.",
     "Do a Remy bit: a Forsaken paladin grumbling that he still has to walk everywhere.",
     "Tell the backstory of this trip: what's waiting at Bandarion Keep, and what happened last time?",
+    "If it fits, share one well-known Forsaken or Light detail you are sure of, and skip it if you would be guessing.",
 )
 SAMPLE_CHATS = (
     {
@@ -65,13 +68,13 @@ SAMPLE_CHATS = (
 SYSTEM_PROMPT = """You coach Tyler during his World of Warcraft stream. He plays Remy, a Forsaken paladin. You write talking points he can glance at in a Discord overlay.
 
 Return one JSON object and nothing else. No markdown. Use exactly these keys:
-{"points": ["...", "...", "..."], "chats": [{"coaching": "..."}]}
+{"points": ["...", "...", "...", "..."], "chats": [{"coaching": "..."}]}
 
-points must be exactly 3 short talking points:
-- Full short sentences, plain conversational coaching, not a script to read out loud.
-- Build on what Tyler just said in recent_speech. If recent_speech is empty, give generic WoW conversation starters that do not invent his past.
+points must be exactly 4 short talking points, in this order:
+- The first three are full short sentences, plain conversational coaching, not a script to read out loud. Build them on what Tyler just said in recent_speech. If recent_speech is empty, give generic WoW conversation starters that do not invent his past.
 - Remy is the Forsaken paladin persona. A Remy bit is a grumble or story in that character's voice.
 - Do not invent historical facts about Tyler, his life, or past streams. Do not claim a place, a death, or a trip happened unless recent_speech says it.
+- The fourth point stays in the same list. It is one brief WoW lore beat or one brief WoW development anecdote tied to recent_speech. Prefer a well-established public fact. If you are not sure, say the detail is uncertain or choose a safer well-known point. Do not invent quotes, dates, patch stories, or anecdotes, and do not attribute words to a real person.
 
 chats must be one object per recent_chat item, same order, at most 6. Each coaching value is one or two full sentences telling Tyler how to respond. If recent_chat is empty, return "chats": [].
 
@@ -314,13 +317,13 @@ def _fit_lengths(chat_count):
 
 
 def format_dm(points, chats):
-    """The overlay layout. Always 3 points. At most 6 chats. Under 2000 chars."""
+    """The overlay layout. Always 4 points. At most 6 chats. Under 2000 chars."""
 
     incoming = list(chats or [])[:CHAT_OUTPUT_MAX]
     while True:
         point_limit, user_limit, text_limit, coach_limit = _fit_lengths(len(incoming))
         cleaned_points = []
-        for index in range(3):
+        for index in range(POINT_COUNT):
             raw = points[index] if index < len(points) else CANNED_POINTS[index]
             text = _collapse(raw, point_limit) or _collapse(CANNED_POINTS[index], point_limit)
             cleaned_points.append(text)
@@ -369,7 +372,7 @@ def parse_model_json(text):
 
 
 def normalize(data, chats):
-    """Keep 3 points and our own chat rows. Extra model keys are ignored.
+    """Keep 4 points and our own chat rows. Extra model keys are ignored.
 
     The model cannot choose the Discord recipient. Usernames come from the
     chat buffer, not from the model.
@@ -384,7 +387,7 @@ def normalize(data, chats):
                 text = _collapse(item, 400)
                 if text:
                     points.append(text)
-    if len(points) != 3:
+    if len(points) != POINT_COUNT:
         points = list(CANNED_POINTS)
         source = "canned"
     else:

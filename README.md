@@ -410,7 +410,7 @@ Each real trigger with an utterance, and each explicit `POST /lull`, makes one `
 
 A non-200 from Gemini logs `http=`, `model=`, `status=`, and `message=` from Google's error object. The key and the utterance are not written there. Listing models can still show `gemini-2.5-flash` when `generateContent` for that id returns 404. Read `message=` before changing `LULL_MODEL`. The counselor route's default is a different id, `gemini-2.5-flash-lite`.
 
-The model is asked for JSON with exactly 3 talking points and one coaching line per chat message (at most 6). Points are full short sentences, conversational coaching, built on what you just said. Remy is the Forsaken paladin. The prompt tells the model not to invent your history. If the key is missing, the cap is hit, the request fails, Gemini returns 429, or the JSON is unusable, the DM uses three canned generic WoW points instead. Those canned lines are not a biography.
+The model is asked for JSON with exactly 4 talking points and one coaching line per chat message (at most 6). The first three are full short sentences of conversational coaching, built on what you just said. The fourth stays in that same numbered list: one brief WoW lore beat or development anecdote tied to the utterance. It should prefer a well-known fact and say when a detail is uncertain, rather than invent a quote or a story. Remy is the Forsaken paladin. The prompt tells the model not to invent your history. If the key is missing, the cap is hit, the request fails, Gemini returns 429, or the JSON is unusable, the DM uses four canned generic WoW points instead. Those canned lines are not a biography and not a Blizzard anecdote.
 
 If Discord is not configured, the trigger does not call Gemini.
 
@@ -432,6 +432,7 @@ The overlay shape is:
 1. ...
 2. ...
 3. ...
+4. ...
 
 ━━━━━━━━━━
 **💬 CHAT (last 3 min)**

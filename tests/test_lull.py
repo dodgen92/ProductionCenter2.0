@@ -91,6 +91,7 @@ def good_model_payload(points=None, chats=None):
             "Ask chat what they are working on tonight.",
             "Do a Remy bit about the long road.",
             "Say where this character is walking next.",
+            "Mention one well-known WoW detail that fits, and skip it if you are unsure.",
         ],
         "chats": chats or [],
     }
@@ -151,6 +152,7 @@ def test_preview_layout_matches_the_overlay_sample():
         "1. Ask chat what the longest walk they've ever done in WoW was, and whether it was worth it.\n"
         "2. Do a Remy bit: a Forsaken paladin grumbling that he still has to walk everywhere.\n"
         "3. Tell the backstory of this trip: what's waiting at Bandarion Keep, and what happened last time?\n"
+        "4. If it fits, share one well-known Forsaken or Light detail you are sure of, and skip it if you would be guessing.\n"
         "\n"
         "━━━━━━━━━━\n"
         "**💬 CHAT (last 3 min)**\n"
@@ -164,14 +166,35 @@ def test_preview_layout_matches_the_overlay_sample():
 
 
 def test_empty_chat_says_no_new_chats():
-    """No chat lines still leave three points and a readable empty line."""
+    """No chat lines still leave four points and a readable empty line."""
 
     message = lull.format_dm(list(lull.CANNED_POINTS), [])
     assert message.count("\n1. ") + message.startswith("**🎙️ TALKING POINTS**\n1. ") >= 1
     assert "\n2. " in message
     assert "\n3. " in message
+    assert "\n4. " in message
+    assert message.index("\n4. ") < message.index("CHAT")
+    assert len(lull.CANNED_POINTS) == 4
     assert "No new chats." in message
     assert "CHAT (last 3 min)" in message
+
+
+def test_fourth_point_stays_inside_talking_points():
+    """Item 4 is another talking point. Three model points are not enough."""
+
+    short = {"points": ["One.", "Two.", "Three."]}
+    canned, _, source = lull.normalize(short, [])
+    assert source == "canned"
+    assert canned == list(lull.CANNED_POINTS)
+    kept, _, source = lull.normalize(
+        {"points": ["One.", "Two.", "Three.", "A well-known lore beat, if you are sure."]},
+        [],
+    )
+    assert source == "gemini"
+    assert len(kept) == 4
+    message = lull.format_dm(kept, [])
+    assert "\n4. A well-known lore beat, if you are sure." in message
+    assert message.index("\n4. ") < message.index("**💬 CHAT")
 
 
 def test_chat_window_and_memory_cap(clock):
@@ -370,6 +393,7 @@ def test_untrusted_text_cannot_change_recipient_or_ping(clock, monkeypatch, usag
             "Ask chat what they noticed. @everyone",
             "Do a Remy bit about the walk.",
             "Tell them the next stop.",
+            "Share a well-known Light detail only if you are sure.",
         ],
         chats=[{"coaching": "Welcome them. @everyone <@42>", "recipient": "999"}],
     )
@@ -417,7 +441,7 @@ def test_daily_cap_blocks_a_second_gemini_call(clock, monkeypatch, usage_file):
 def test_discord_length_stays_under_the_limit():
     """A huge model reply is shortened, and mentions inside it cannot ping."""
 
-    points = ["Point @everyone " + ("a" * 4000) for _ in range(3)]
+    points = ["Point @everyone " + ("a" * 4000) for _ in range(4)]
     chats = []
     for index in range(6):
         chats.append({
