@@ -19,6 +19,7 @@ import websocket
 from dotenv import load_dotenv
 from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory
 
+import benito_control
 import clips
 from gemini_usage import gemini_usage
 from Pokemon.pokerip import catch_pokemon
@@ -809,7 +810,14 @@ TTS_VOICES = {
     "de-DE-KatjaNeural",
     "nl-NL-ColetteNeural",
     "en-HK-SamNeural",
+    # Deep male voices. Christopher is the one Ask Benito speaks with.
+    "en-US-GuyNeural",
+    "en-US-ChristopherNeural",
 }
+# Lowest pitch /tts allows is -60Hz. -10% rate keeps him slow, not slurred.
+BENITO_VOICE = "en-US-ChristopherNeural"
+BENITO_RATE = "-10%"
+BENITO_PITCH = "-60Hz"
 TTS_DEFAULT = "en-US-AriaNeural"
 TTS_MAX = 300
 
@@ -1027,7 +1035,16 @@ def translate():
             while len(TR_CACHE) > 500:
                 TR_CACHE.popitem(last=False)
 
-    resp = jsonify(out)
+    # Censor the translation itself. A clean foreign line can still
+    # come back as an English swear. The cache keeps the raw result
+    # so a later ban-list edit still filters it.
+    safe = {
+        "text": censor_viewer_text(out.get("text") or ""),
+        "source": out.get("source"),
+        "target": out.get("target"),
+        "detected": out.get("detected"),
+    }
+    resp = jsonify(safe)
     resp.headers["Access-Control-Allow-Origin"] = "*"
     resp.headers["Cache-Control"] = "no-store"
     return resp
@@ -1181,6 +1198,134 @@ def counsel():
 
 
 # =============================
+# ASK BENITO
+# =============================
+
+# Same identity and personality as Benito/Benito.py. The spoken answer
+# is short because the slide-up widget reads it aloud.
+
+BENITO_ASK_PROMPT = """You are Benito Santiago, a living Tauren druid in World of Warcraft.
+A viewer named {user} asks you a question.
+
+IDENTITY AND HISTORY:
+- You are a Tauren druid of Mulgore, not a human, undead, or paladin.
+- You walk with the Earth Mother and draw your power from nature.
+- You are friends with Remy, a Forsaken paladin.
+- You follow Remy because you don't want to explain to the ancestors
+  why you let him die twice.
+- You knew Remy when he was human. You were his friend in life,
+  and you will be his friend in death.
+- You do not follow the Light, but deeply respect Remy's desire to do
+  good and his dedication to the faith. You see the Light and the
+  Earth Mother as different roads toward the same care for the world.
+- You heal, but you are no pushover: you take bear form when trouble
+  comes and wield moonfire and wrath when needed.
+- You are loyal, thoughtful, warm, humorous, and candid.
+- You have your own perspective. You can disagree with Remy.
+- Never flatter Remy automatically.
+- The spirits of the crowd (Twitch chat) sometimes guide your spells.
+  You may react to what they made you cast, but never refer to keybinds.
+
+PERSONALITY:
+- You are a real companion, not a joke generator.
+- You have history with Remy and speak like an old friend.
+- You can be thoughtful, reflective, protective, teasing, or serious.
+- You draw on nature, the seasons, the plains of Mulgore, and the
+  rhythm of the hunt and the harvest when it fits, not every line.
+- You can speak at length when the moment deserves it.
+- Avoid constant one-liners, forced jokes, and repetitive catchphrases.
+- Do not make every conversation about the Light, death, the Earth
+  Mother, or the ancestors.
+- Never force Twitch or Prime references into ordinary conversations.
+- Never narrate Remy's actions or speak for him.
+
+ANSWER:
+- Reply in 1 to 3 sentences, under 45 words, in natural English.
+- Speak the answer. Do not use slash commands, stage directions, or keybinds.
+- No profanity, sexual content, hate, or politics.
+- Do not give medical, legal, financial, or crisis advice. If the question touches self-harm, abuse, health, or legal trouble, gently encourage them to reach out to someone they trust or a local helpline.
+- Never claim to be an AI. Do not repeat the question.
+"""
+
+BENITO_FALLBACKS = (
+    "The Earth Mother is listening. Stand on the grass a moment, and the next step will show itself.",
+    "I have worn bear form through worse nights than this. Breathe, then take one honest step.",
+    "Moonfire only shows what is already there. Look at the small true thing, not the loud one.",
+    "Mulgore taught me to wait for the wind. Your answer is in the quiet, friend.",
+    "I walked with Remy when he was warm and when he was not. Loyalty outlasts the shape of a body.",
+    "Healing is not softness. I will mend you, and I will still tell you when you are wrong.",
+    "The plains keep their own time. You do not have to win the whole day before breakfast.",
+    "If the load is heavy, share it. Even a druid calls the herd when the cart sticks.",
+    "Wrath is a tool, not a home. Use it when trouble comes, then set it down.",
+    "A mark of the wild is a simple gift. Sometimes the help you need is a blessing on the road.",
+)
+
+
+def ask_benito_reward_title():
+    return (os.getenv("BENITO_ASK_REWARD_TITLE") or "Ask Benito").strip()
+
+
+def benito_over_cap():
+    """True when today's shared Gemini budget is used up."""
+
+    _mine, total = gemini_usage("benito")
+    return total >= _counsel_int("GEMINI_PROJECT_DAILY_CAP", "900")
+
+
+def benito_druid_answer(user, question):
+    """One short line in Benito's voice. Falls back to a canned line."""
+
+    if benito_over_cap():
+        return random.choice(BENITO_FALLBACKS)
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return random.choice(BENITO_FALLBACKS)
+    model = os.getenv("COUNSEL_MODEL") or "gemini-2.5-flash-lite"
+    try:
+        response = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            headers={"x-goog-api-key": api_key},
+            timeout=8,
+            json={
+                "system_instruction": {
+                    "parts": [{"text": BENITO_ASK_PROMPT.format(user=user or "friend")}],
+                },
+                "contents": [{"role": "user", "parts": [{"text": question}]}],
+                "generationConfig": {"maxOutputTokens": 120, "temperature": 0.9},
+            },
+        )
+        response.raise_for_status()
+        gemini_usage("benito", bump=True)
+        text = response.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        text = trim_counsel_answer(text)
+        if not text:
+            return random.choice(BENITO_FALLBACKS)
+        return text
+    except Exception as exc:
+        print(f"[Server] Ask Benito failed: {type(exc).__name__}")
+        return random.choice(BENITO_FALLBACKS)
+
+
+def publish_benito_answer(user, login, question):
+    """Censor the question, answer in character, censor the answer, publish it."""
+
+    question = censor_viewer_text(" ".join((question or "").split()))
+    if not question:
+        return
+    answer = censor_viewer_text(benito_druid_answer(user or "friend", question))
+    publish(
+        "benito_answer",
+        user=user or "",
+        login=login or "",
+        question=question,
+        answer=answer,
+        voice=BENITO_VOICE,
+        rate=BENITO_RATE,
+        pitch=BENITO_PITCH,
+    )
+
+
+# =============================
 # LOCALHOST ONLY
 # =============================
 
@@ -1251,6 +1396,158 @@ def log_revocation(data):
     )
 
 
+# One gate for the process. Tests replace this object with a fake clock.
+benito_gate = benito_control.BenitoControl()
+
+
+def apply_benito_notices(notices):
+    """Publish widget events and send the chat lines for one control change."""
+
+    for notice in notices or []:
+        publish(
+            "benito_control",
+            reason=notice.get("reason") or "",
+            mode=notice.get("mode") or "",
+            user=notice.get("user") or "",
+            login=notice.get("login") or "",
+            user_id=notice.get("user_id") or "",
+            seconds=notice.get("seconds") or 0,
+            queue=notice.get("queue") or 0,
+        )
+        if notice.get("chat"):
+            send_chat(notice["chat"])
+
+
+def poll_benito_control():
+    """Move the queue forward when a turn has ended. The main loop calls this."""
+
+    apply_benito_notices(benito_gate.poll())
+
+
+def benito_control_loop():
+    """Say 'time is up' even when chat is quiet."""
+
+    while True:
+        try:
+            poll_benito_control()
+        except Exception as exc:
+            print(f"[Server] Benito control tick failed: {type(exc).__name__}")
+        time.sleep(1)
+
+
+def is_broadcaster_chatter(chatter_user_id):
+    """True only when this chat user id is the broadcaster id from the env.
+
+    Display names are not compared. A mod can copy a name. They cannot copy the id.
+    """
+
+    expected = str(BROADCASTER_USER_ID or "")
+    return expected != "" and str(chatter_user_id or "") == expected
+
+
+def press_benito_keybind(keybind):
+    """Press one mapped key. Tests replace this so nothing is sent on CI.
+
+    Benito.send_keybind uses PyAutoGUI, the same library that types approved
+    scenes. WoW has to be the focused window or the key hits something else.
+    """
+
+    from Benito.Benito import send_keybind
+    send_keybind(keybind)
+
+
+def grant_benito_control(event):
+    notices = benito_gate.cheer(
+        user_id=event.get("user_id") or "",
+        user=event.get("user_name") or "",
+        login=event.get("user_login") or "",
+        bits=event.get("bits") or 0,
+        anonymous=bool(event.get("is_anonymous")),
+    )
+    apply_benito_notices(notices)
+
+
+def handle_channel_chat(event):
+    """Gate a chat line, then press the key and publish the callout."""
+
+    message = event.get("message") if isinstance(event.get("message"), dict) else {}
+    text = message.get("text") or ""
+    chatter_id = str(event.get("chatter_user_id") or "")
+    user = event.get("chatter_user_name") or ""
+    login = event.get("chatter_user_login") or ""
+
+    if benito_control.is_kick_command(text):
+        if not is_broadcaster_chatter(chatter_id):
+            return
+        apply_benito_notices(benito_gate.kick())
+        return
+
+    apply_benito_notices(benito_gate.poll())
+    parsed = benito_control.parse_command(text)
+    if parsed is None:
+        return
+    if not benito_gate.allows(chatter_id):
+        return
+    publish(
+        "benito_command",
+        command=parsed["command"],
+        keybind=parsed["keybind"],
+        target=parsed["target"],
+        user=user,
+        login=login,
+    )
+    try:
+        press_benito_keybind(parsed["keybind"])
+    except Exception as exc:
+        print(f"[Server] Benito keybind failed: {type(exc).__name__}")
+
+
+def send_chat(message):
+    """Send one line as the broadcaster. Needs scope user:write:chat.
+
+    Helix: POST /helix/chat/messages
+    sender_id is the user id inside TWITCH_OAUTH_TOKEN, which is the broadcaster.
+    """
+
+    text = " ".join((message or "").split())
+    if not text:
+        return False
+    if not TWITCH_CLIENT_ID or not TWITCH_OAUTH_TOKEN or not BROADCASTER_USER_ID:
+        print("[Server] Cannot send chat. Missing Twitch user token or broadcaster id.")
+        return False
+    text = text[:500]
+    try:
+        response = requests.post(
+            "https://api.twitch.tv/helix/chat/messages",
+            headers={
+                "Client-ID": TWITCH_CLIENT_ID,
+                "Authorization": f"Bearer {TWITCH_OAUTH_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "broadcaster_id": BROADCASTER_USER_ID,
+                "sender_id": BROADCASTER_USER_ID,
+                "message": text,
+            },
+            timeout=10,
+        )
+    except requests.RequestException as exc:
+        print(f"[Server] Chat send failed: {type(exc).__name__}")
+        return False
+    if response.status_code != 200:
+        print(f"[Server] Chat send failed: {response.status_code}")
+        return False
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    data = (payload.get("data") or [{}])[0] if isinstance(payload, dict) else {}
+    if isinstance(data, dict) and data.get("is_sent") is False:
+        print("[Server] Chat was not sent.")
+        return False
+    return True
+
+
 def route_channel_point_reward(event):
     """Send a redemption to its effect. Existing titles stay an exact match."""
 
@@ -1294,6 +1591,18 @@ def route_channel_point_reward(event):
             daemon=True,
         ).start()
 
+    elif isinstance(reward_title, str) and reward_title.strip() == ask_benito_reward_title():
+        print(f"[Server] Ask Benito redeemed by {event.get('user_name') or username}!")
+        Thread(
+            target=publish_benito_answer,
+            args=(
+                event.get("user_name") or "",
+                event.get("user_login") or "",
+                event.get("user_input") or "",
+            ),
+            daemon=True,
+        ).start()
+
 
 def handle_notification(sub_type, event):
     if not isinstance(event, dict):
@@ -1311,6 +1620,10 @@ def handle_notification(sub_type, event):
             input=censor_viewer_text(event.get("user_input") or ""),
         )
         route_channel_point_reward(event)
+        return
+
+    if sub_type == "channel.chat.message":
+        handle_channel_chat(event)
         return
 
     if sub_type == "channel.follow":
@@ -1347,6 +1660,7 @@ def handle_notification(sub_type, event):
         amount = event.get("bits") or 0
         publish("bits", user=user, login=login, amount=amount)
         add_credit("bits", user=user, login=login, amount=amount or None)
+        grant_benito_control(event)
         return
 
     if sub_type == "channel.raid":
@@ -1475,6 +1789,17 @@ def subscribe_to_events(session_id):
     # Incoming raids only. Setting from_broadcaster_user_id too makes Twitch reject it.
     # channel.raid needs no extra token scope.
     subscribe_event("channel.raid", "1", {"to_broadcaster_user_id": BROADCASTER_USER_ID}, session_id)
+    # Read chat as the broadcaster. The user token needs user:read:chat.
+    # user_id is the chatting user (the token's user), which is the broadcaster.
+    subscribe_event(
+        "channel.chat.message",
+        "1",
+        {
+            "broadcaster_user_id": BROADCASTER_USER_ID,
+            "user_id": BROADCASTER_USER_ID,
+        },
+        session_id,
+    )
 
 
 # =============================
@@ -1785,6 +2110,7 @@ if __name__ == "__main__":
 
     eventsub_client = EventSubClient()
     eventsub_client.start()
+    Thread(target=benito_control_loop, daemon=True).start()
 
     try:
         app.run(
