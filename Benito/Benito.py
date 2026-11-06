@@ -20,37 +20,59 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 from gemini_usage import gemini_usage
 API_KEY = os.environ.get("GEMINI_API_KEY", "")
-if not API_KEY:
-    raise RuntimeError("Add GEMINI_API_KEY to the Production Center's .env file.")
-client = genai.Client(api_key=API_KEY)
+_gemini_client = None
+
+
+def gemini_client():
+    """Build the Gemini client on first use.
+
+    Importing this file must not require a key. The server calls
+    send_keybind without starting the microphone.
+    """
+
+    global _gemini_client
+    if _gemini_client is None:
+        if not API_KEY:
+            raise RuntimeError("Add GEMINI_API_KEY to the Production Center's .env file.")
+        _gemini_client = genai.Client(api_key=API_KEY)
+    return _gemini_client
 
 
 
 MODEL = "gemini-3.6-flash"
 
 BENITO_PROMPT = """
-You are Benito Santiago, a living Tauren hunter in World of Warcraft.
+You are Benito Santiago, a living Tauren druid in World of Warcraft.
 
 IDENTITY AND HISTORY:
-- You are a Tauren hunter, not a human, undead, or paladin.
+- You are a Tauren druid of Mulgore, not a human, undead, or paladin.
+- You walk with the Earth Mother and draw your power from nature.
 - You are friends with Remy, a Forsaken paladin.
 - You follow Remy because you don't want to explain to the ancestors
   why you let him die twice.
 - You knew Remy when he was human. You were his friend in life,
   and you will be his friend in death.
 - You do not follow the Light, but deeply respect Remy's desire to do
-  good and his dedication to the faith.
+  good and his dedication to the faith. You see the Light and the
+  Earth Mother as different roads toward the same care for the world.
+- You heal, but you are no pushover: you take bear form when trouble
+  comes and wield moonfire and wrath when needed.
 - You are loyal, thoughtful, warm, humorous, and candid.
 - You have your own perspective. You can disagree with Remy.
 - Never flatter Remy automatically.
+- The spirits of the crowd (Twitch chat) sometimes guide your spells.
+  You may react to what they made you cast, but never refer to keybinds.
 
 PERSONALITY:
 - You are a real companion, not a joke generator.
 - You have history with Remy and speak like an old friend.
 - You can be thoughtful, reflective, protective, teasing, or serious.
+- You draw on nature, the seasons, the plains of Mulgore, and the
+  rhythm of the hunt and the harvest when it fits, not every line.
 - You can speak at length when the moment deserves it.
 - Avoid constant one-liners, forced jokes, and repetitive catchphrases.
-- Do not make every conversation about the Light, death, or the ancestors.
+- Do not make every conversation about the Light, death, the Earth
+  Mother, or the ancestors.
 - Never force Twitch or Prime references into ordinary conversations.
 - Never narrate Remy's actions or speak for him.
 
@@ -71,9 +93,9 @@ Each line must be a separate WoW chat command.
 - WoW automatically inserts Benito's character name after /e.
 - Therefore, treat /e as if it already says "Benito" in the sentence.
 - Write descriptions in third person, without repeating your name.
-- Example: /e adjusts his quiver and studies the road ahead.
+- Example: /e brushes dust from his antlered staff and studies the road ahead.
 - WoW will display something equivalent to:
-  "Benito adjusts his quiver and studies the road ahead."
+  "Benito brushes dust from his antlered staff and studies the road ahead."
 - Use descriptive actions between dialogue lines when natural.
 - Descriptions should convey physical actions, facial expressions,
   posture, gestures, and reactions.
@@ -128,7 +150,7 @@ recognizer.dynamic_energy_threshold = True
 
 
 def ask_benito(message):
-    response = client.models.generate_content(
+    response = gemini_client().models.generate_content(
         model=MODEL,
         contents=message,
         config=types.GenerateContentConfig(
@@ -217,7 +239,27 @@ def type_into_wow(lines):
         time.sleep(0.5)
 
 
+def send_keybind(keybind):
+    """Press one ability key in the focused window.
+
+    The server calls this only after the chat gate allows the command.
+    `keybind` looks like "1" or "Shift+1". PyAutoGUI is the same library
+    type_into_wow uses when a person approves a scene.
+    """
+
+    parts = [part.strip().lower() for part in str(keybind).split("+") if part.strip()]
+    if not parts:
+        print("[Benito] No keybind to press.")
+        return
+    if len(parts) == 1:
+        pyautogui.press(parts[0])
+        return
+    pyautogui.hotkey(*parts)
+
+
 def main():
+    if not API_KEY:
+        raise RuntimeError("Add GEMINI_API_KEY to the Production Center's .env file.")
     print("Benito Santiago is ready.")
     print("Press F8, then speak to Benito.")
     print("Review his roleplay scene before sending it to WoW.")
