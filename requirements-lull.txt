@@ -1,0 +1,6 @@
+# Optional microphone worker for Lull Helper. Windows PC only.
+# Do not install this just to import or test the server.
+# The model downloads when the mic worker starts, not when Python imports lull.py.
+# Weights land in the Hugging Face cache, not in this repo.
+faster-whisper
+sounddevice

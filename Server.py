@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory
 
 import clips
+import lull
 from gemini_usage import gemini_usage
 from Pokemon.pokerip import catch_pokemon
 
@@ -1181,6 +1182,56 @@ def counsel():
 
 
 # =============================
+# LULL HELPER
+# =============================
+
+@app.route("/lull/status", methods=["GET"])
+def lull_status():
+    """Mic on/off and how many chat lines are buffered. No transcript text."""
+
+    return jsonify(lull.status_snapshot())
+
+
+@app.route("/lull/mic", methods=["POST"])
+def lull_mic():
+    """Start or stop the local microphone. This is the only way it turns on."""
+
+    if not lull.route_authorized(request.headers.get("X-Lull-Token"), request.args.keys()):
+        print("[Lull] POST /lull/mic refused.")
+        return jsonify({"error": "unauthorized"}), 403
+    body = request.get_json(silent=True) or {}
+    action = body.get("action") if isinstance(body, dict) else None
+    if action == "start":
+        return jsonify(lull.start_mic())
+    if action == "stop":
+        return jsonify(lull.stop_mic())
+    return jsonify({"error": "action must be start or stop"}), 400
+
+
+@app.route("/lull", methods=["POST"])
+def lull_trigger():
+    """One coaching DM. test=1 previews on this PC and does not leave the machine.
+
+    A real trigger needs the local header secret. The hotkey does not use this
+    route. Forwarded requests are already refused by localhost_only.
+    """
+
+    if request.args.get("test") == "1":
+        # Preview stays local. A secret in the query string is still refused.
+        if lull.query_carries_secret(request.args.keys()):
+            print("[Lull] POST /lull refused.")
+            return jsonify({"error": "unauthorized"}), 403
+        return jsonify(lull.preview())
+    if not lull.route_authorized(request.headers.get("X-Lull-Token"), request.args.keys()):
+        print("[Lull] POST /lull refused.")
+        return jsonify({"error": "unauthorized"}), 403
+    result = lull.trigger(origin="route")
+    status = result.get("status", 200)
+    body = {key: result.get(key) for key in ("ok", "delivered", "source", "chat_count", "reason")}
+    return jsonify(body), status
+
+
+# =============================
 # LOCALHOST ONLY
 # =============================
 
@@ -1251,6 +1302,22 @@ def log_revocation(data):
     )
 
 
+def handle_channel_chat(event):
+    """Store one chat line for the next explicit Lull Helper trigger.
+
+    This is the only chat subscription, on the existing EventSub socket.
+    PR #14 (Benito) listens to this same event and the same Helix condition.
+    When the branches are combined, keep one subscription and one function:
+    record the line here, then run Benito's gate. Do not open a second socket.
+    Lull Helper does not answer chat and does not send chat.
+    """
+
+    try:
+        lull.note_chat_event(event)
+    except Exception as exc:
+        print(f"[Lull] Could not store a chat line: {type(exc).__name__}")
+
+
 def route_channel_point_reward(event):
     """Send a redemption to its effect. Existing titles stay an exact match."""
 
@@ -1311,6 +1378,10 @@ def handle_notification(sub_type, event):
             input=censor_viewer_text(event.get("user_input") or ""),
         )
         route_channel_point_reward(event)
+        return
+
+    if sub_type == "channel.chat.message":
+        handle_channel_chat(event)
         return
 
     if sub_type == "channel.follow":
@@ -1380,8 +1451,10 @@ def deliver_eventsub_message(message_type, data):
             event = {}
         subscription = data.get("subscription") or {}
         sub_type = subscription.get("type", "") if isinstance(subscription, dict) else ""
-        print("EventSub event received:")
-        print(json.dumps(event, indent=2))
+        # Chat text stays in the RAM buffer. Do not print the line.
+        if sub_type != "channel.chat.message":
+            print("EventSub event received:")
+            print(json.dumps(event, indent=2))
         handle_notification(sub_type, event)
         return
 
@@ -1475,6 +1548,17 @@ def subscribe_to_events(session_id):
     # Incoming raids only. Setting from_broadcaster_user_id too makes Twitch reject it.
     # channel.raid needs no extra token scope.
     subscribe_event("channel.raid", "1", {"to_broadcaster_user_id": BROADCASTER_USER_ID}, session_id)
+    # Read chat as the broadcaster. The user token needs user:read:chat.
+    # user_id is the chatting user (the token's user), which is the broadcaster.
+    subscribe_event(
+        "channel.chat.message",
+        "1",
+        {
+            "broadcaster_user_id": BROADCASTER_USER_ID,
+            "user_id": BROADCASTER_USER_ID,
+        },
+        session_id,
+    )
 
 
 # =============================
@@ -1785,6 +1869,13 @@ if __name__ == "__main__":
 
     eventsub_client = EventSubClient()
     eventsub_client.start()
+
+    # The hotkey is armed here. The microphone stays off until POST /lull/mic.
+    try:
+        lull.start_hotkey()
+    except Exception as exc:
+        print(f"[Lull] Hotkey did not start: {type(exc).__name__}")
+    print("[Lull] Microphone is off until you start it with POST /lull/mic.")
 
     try:
         app.run(

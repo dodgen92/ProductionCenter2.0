@@ -56,6 +56,8 @@ flowchart LR
 
 ```
 Server.py              Flask server: EventSub WebSocket, feed, TTS, translate, credits
+lull.py                Lull Helper: mic transcript, chat buffer, hotkey, Gemini, Discord DM
+requirements-lull.txt  Optional Windows packages for the microphone worker
 archive.py             Auto-clipping loop (Twitch Helix) + Discord posting
 clips.py               App access token, Helix clip lookups, and the mp4 downloader
 clips_cache/           Downloaded mp4 clips and index.json (gitignored; rebuilt on startup)
@@ -100,6 +102,7 @@ Put the access token in `TWITCH_OAUTH_TOKEN` and the app's client id in `TWITCH_
 | `channel:read:subscriptions` | Subs, resubs, and gifted subs |
 | `bits:read` | Cheers (`channel.cheer` v1) |
 | (none) | Incoming raids (`channel.raid` v1) |
+| `user:read:chat` | Lull Helper chat buffer (`channel.chat.message` v1). Same scope Benito's open PR uses. Not required for the other rewards. |
 
 Follow v2 also sends `moderator_user_id`. This server sets that to `BROADCASTER_USER_ID`, so the token has to belong to the broadcaster (you are always a mod on your own channel).
 
@@ -156,7 +159,15 @@ Names in `.env.example`:
 | `COUNSEL_MODEL` | No | Blank means `gemini-2.5-flash-lite`. |
 | `COUNSEL_USER_COOLDOWN` | No | Seconds between Gemini answers for one viewer. Blank means 60. |
 | `COUNSEL_DAILY_CAP` | No | Monk calls per local day. Blank means 100. |
-| `GEMINI_PROJECT_DAILY_CAP` | No | Monk + Benito calls per local day. Blank means 900, so a busy night leaves room for Benito. |
+| `GEMINI_PROJECT_DAILY_CAP` | No | Monk + Benito calls per local day. Blank means 900, so a busy night leaves room for Benito. Lull Helper counts toward the same number. |
+| `LULL_TRIGGER_TOKEN` | For POST /lull | Local header secret. Blank refuses the route. |
+| `LULL_DISCORD_TOKEN` | For a real DM | Bot token. Not the clip webhook. |
+| `LULL_DISCORD_USER_ID` | For a real DM | The only Discord user id that receives the DM. |
+| `LULL_HOTKEY` | No | Blank means `f9`. |
+| `LULL_WHISPER_MODEL` | No | `base` or `small`. Blank means `base`. |
+| `LULL_MIC_DEVICE` | No | Mic name or index. Blank means the default input. |
+| `LULL_DAILY_CAP` | No | Lull Gemini calls per local day. Blank means 40. |
+| `LULL_MODEL` | No | Blank means `gemini-2.5-flash`. |
 
 ### 4. Launch
 ```bash
@@ -305,6 +316,153 @@ python widgets\fact-gnome\tools\make_gnome_voices.py --voice af_nicole --ghoul
 `widgets/fact-gnome/facts/spoken.js` is optional. The bubble still shows the plain fact from `facts.js`. If that exact text is a key in `spoken.js`, Kokoro says the value instead. The value can use Kokoro markup: `[Staats](/stˈæts/)` for a pronunciation, `[them](+1)` for stress, and `…` `—` `;` for pauses. `voices.js` stays keyed by the plain fact. A fact with no spoken line is read as written, and its file name stays the same as before. The spoken.js in the repo already has a line for every current fact, so the next run rebuilds every wav and removes the old files.
 
 In OBS, refresh the Fact Gnome browser source. Rerun the script when `facts.js` or `spoken.js` changes, or when you change `--pitch` or `--ghoul`. Lines that already exist for the same settings are skipped, and audio for a deleted fact is removed. A rerun replaces the shipped `voices.js` (the `gnome_0N.mp3` map). Copy that file aside first if you still want those recordings. The widget README has the short version of how to swap one line.
+
+## 🎙️ Lull Helper
+
+On demand, Production Center DMs Tyler three short talking points plus coaching for recent Twitch chat. He reads that DM in Discord's in-game overlay. Nothing sends itself. Press the hotkey, or have Stream Deck POST `/lull`. A quiet minute does not call Gemini and does not DM anyone.
+
+The microphone, the hotkey, Gemini, and Discord are separate. The server imports without them. Tests use fakes and do not open a mic, call Google, or talk to Discord.
+
+### What stays on this PC
+
+- The mic worker keeps the last ~5 minutes of transcript in RAM (300 seconds). It does not write a recording or a transcript file. Stop drops that text.
+- Chat lines from the existing EventSub socket stay in RAM for 3 minutes. The buffer is capped at 300 lines.
+- A trigger sends Gemini only the text of that speech (capped) and at most 6 chat lines. The raw audio never leaves the machine. The Discord DM is the coaching text, not a dump of the transcript.
+- Logs do not include the transcript, the chat text, the bot token, the Gemini key, or the trigger token.
+
+Speech and chat are untrusted data in the prompt. They cannot change the Discord recipient, the token, or what the route is allowed to do. The recipient is `LULL_DISCORD_USER_ID` only.
+
+### Microphone (optional, Windows)
+
+The worker is off until you start it. Importing the server does not download a model.
+
+```bash
+pip install -r requirements-lull.txt
+```
+
+That file is optional. It installs `faster-whisper` and `sounddevice`. PyAudio is already in `requirements.txt` and is the fallback if sounddevice cannot open the device. Do not install this into the Fact Gnome voice venv.
+
+`LULL_WHISPER_MODEL` is `base` (the default) or `small`. The worker calls `WhisperModel` only after start, which is when faster-whisper downloads weights into the Hugging Face cache (not this repo). `int8` is the CPU compute type applied at load. This repo did not measure a separate int8 download.
+
+Checked 2026-11-06 against the Hugging Face tree API:
+
+| Model | `model.bin` | Also in that repo |
+|---|---|---|
+| [Systran/faster-whisper-base](https://huggingface.co/api/models/Systran/faster-whisper-base/tree/main) | 145,217,532 bytes | `tokenizer.json` 2,203,239, `vocabulary.txt` 459,861, `config.json` 2,309 |
+| [Systran/faster-whisper-small](https://huggingface.co/api/models/Systran/faster-whisper-small/tree/main) | 483,546,902 bytes | `tokenizer.json` 2,203,239, `vocabulary.txt` 459,861, `config.json` 2,370 |
+
+`base` is the one to use when disk is tight. `small` is the larger download. The pip packages take more space than those files; their wheel sizes are not listed here because this environment did not install them.
+
+Set `LULL_MIC_DEVICE` to a device name fragment or a numeric index. Blank uses the default input. `LULL_WHISPER_DEVICE` blank means `cpu`.
+
+Start and stop from this PC. Replace the header value with the secret you put in `.env`. Do not put that secret in the URL.
+
+```bash
+curl -X POST http://127.0.0.1:5000/lull/mic -H "Content-Type: application/json" -H "X-Lull-Token: YOUR_LOCAL_TOKEN" -d "{\"action\":\"start\"}"
+```
+
+The log line `MIC ACTIVE` means transcription is on. `GET http://127.0.0.1:5000/lull/status` returns `mic.active` and `mic.status` and does not return the transcript.
+
+Stop:
+
+```bash
+curl -X POST http://127.0.0.1:5000/lull/mic -H "Content-Type: application/json" -H "X-Lull-Token: YOUR_LOCAL_TOKEN" -d "{\"action\":\"stop\"}"
+```
+
+`MIC STOPPED` means the worker is off and the rolling transcript was dropped. Missing packages, a failed model download, or no input device set the status to `missing-deps`, `missing-model`, or `no-mic` and leave the server running.
+
+### Chat
+
+Main did not subscribe to chat. This branch adds one `channel.chat.message` subscription on the EventSub socket the server already opens. It does not open a second connection and it does not send chat. The user token needs `user:read:chat`. If that scope is missing, Twitch rejects this one subscription and the other rewards still run.
+
+The condition matches Benito PR #14: `broadcaster_user_id` and `user_id` are both `BROADCASTER_USER_ID`. When you merge that PR, keep a single subscription and a single `handle_channel_chat`. Record the line for Lull, then run Benito's gate. Do not subscribe twice. A second create on the same session comes back as `409` and is logged as already subscribed. Lull does not touch channel-point rewards.
+
+Add the scope on a new user token. Lull does not need `user:write:chat`. That write scope belongs to the Benito PR if you merge it.
+
+```bash
+twitch token -u -s "channel:read:redemptions moderator:read:followers channel:read:subscriptions bits:read user:read:chat"
+```
+
+Empty chat is normal. The DM then says `No new chats.`
+
+### Hotkey and Stream Deck
+
+`LULL_HOTKEY` blank means `f9`. The `keyboard` package installs a low-level Windows hook, so the key fires while WoW is the focused window. The hook does not swallow the key. Pick a key WoW is not using. This is not Benito's F8, and the hotkey code does not import Benito.
+
+The server arms the hotkey when `Server.py` starts. Pressing it is the trigger. If Windows is running WoW as administrator and the server is not, the hook may not see the key. Run them as the same user.
+
+Stream Deck, or anything else on this PC:
+
+```bash
+curl -X POST http://127.0.0.1:5000/lull -H "X-Lull-Token: YOUR_LOCAL_TOKEN"
+```
+
+`POST /lull` is a side effect (one Gemini call and one DM). Three checks sit in front of it:
+
+1. Flask still binds to `127.0.0.1`.
+2. The existing localhost check rejects any other address and any `X-Forwarded-For` or `X-Forwarded-Host`. A public ngrok hop sets those headers, so it is refused.
+3. `X-Lull-Token` must match `LULL_TRIGGER_TOKEN` with a constant-time compare. A blank env value refuses the route. A token in the query string is refused, because query strings land in history.
+
+The response is a short status. It does not include the coaching text. A trigger that is already running, or that lands inside `LULL_COOLDOWN` (blank means 15 seconds), returns 429 and does not call Gemini again.
+
+Offline preview, no token and no network:
+
+```bash
+curl -X POST "http://127.0.0.1:5000/lull?test=1"
+```
+
+That returns a sample DM built from fake lines. It does not read the mic, call Gemini, or send Discord. A forwarded `test=1` is still 403.
+
+### Gemini
+
+Each real trigger makes one `generateContent` call to `LULL_MODEL` (blank means `gemini-2.5-flash`) with `GEMINI_API_KEY`. The call is counted with `gemini_usage("lull")` and shares `GEMINI_PROJECT_DAILY_CAP`. `LULL_DAILY_CAP` blank means 40, which covers a stream that expects about 20 to 40 triggers and stops a stuck key. These caps are local. They do not mean the Gemini API will accept the call, and they do not mean a free tier is available.
+
+The model is asked for JSON with exactly 3 talking points and one coaching line per chat message (at most 6). Points are full short sentences, conversational coaching, built on what you just said. Remy is the Forsaken paladin. The prompt tells the model not to invent your history. If the key is missing, the cap is hit, the request fails, Gemini returns 429, or the JSON is unusable, the DM uses three canned generic WoW points instead. Those canned lines are not a biography.
+
+If Discord is not configured, the trigger does not call Gemini.
+
+### Discord
+
+Use a bot token. Do not use a user token and do not use `DISCORD_CLIP_WEBHOOK_URL` for this. The bot does not read Discord messages.
+
+1. In the Discord developer portal, create an application and add a bot. Reset the token and put it only in `.env` as `LULL_DISCORD_TOKEN`.
+2. OAuth2 URL generator: scope `bot`. Invite it to a server you are in. No admin permission is required to open a DM.
+3. Turn on Developer Mode, copy your user id, and set `LULL_DISCORD_USER_ID`. Allow DMs from members of that server, or the create-DM call fails.
+4. The code calls the documented bot API: `POST /api/v10/users/@me/channels` with that recipient id, then `POST /api/v10/channels/{channel.id}/messages`.
+
+The message stays under Discord's 2000 character limit. `@everyone`, `@here`, and `<@id>` mentions in chat or in the model text are broken with a zero-width space so they cannot ping.
+
+The overlay shape is:
+
+```
+**🎙️ TALKING POINTS**
+1. ...
+2. ...
+3. ...
+
+━━━━━━━━━━
+**💬 CHAT (last 3 min)**
+
+**name:** "what they typed"
+➜ How to answer them.
+```
+
+`POST /lull?test=1` prints a full sample of that shape. A real trigger replaces the sample with the model's lines, or the canned points.
+
+### Offline test and a short Windows check
+
+From this repo, with no tokens:
+
+```bash
+pip install -r requirements-dev.txt
+pytest -v
+```
+
+`POST /lull?test=1` against a local server is the preview. The unit tests mock the clock, the mic, the hotkey, Gemini, Discord, and Twitch.
+
+On the Windows PC, after you fill `.env` yourself: install the optional requirements, start the server, start the mic, say a sentence, press F9 (or the curl above), read the DM in the overlay, then stop the mic and confirm `MIC STOPPED`. That check is for you to run. Development of this branch did not open your microphone, send a Discord message, or talk to Twitch or OBS.
+
+`clips.py` is unchanged. It still prefers `APP_CLIENT_ID` or `CLIENT_ID`, and `TWITCH_CLIENT_SECRET` or `SECRET`.
 
 ## 🧪 Tests
 
