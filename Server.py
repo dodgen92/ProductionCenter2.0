@@ -1187,25 +1187,27 @@ def counsel():
 
 @app.route("/lull/status", methods=["GET"])
 def lull_status():
-    """Mic on/off and how many chat lines are buffered. No transcript text."""
+    """Whether the hotkey is held, and how many chat lines are buffered."""
 
     return jsonify(lull.status_snapshot())
 
 
 @app.route("/lull/mic", methods=["POST"])
 def lull_mic():
-    """Start or stop the local microphone. This is the only way it turns on."""
+    """Kept so an old button cannot open the microphone.
+
+    Recording is hold-to-talk on the hotkey. This route does not start it.
+    """
 
     if not lull.route_authorized(request.headers.get("X-Lull-Token"), request.args.keys()):
         print("[Lull] POST /lull/mic refused.")
         return jsonify({"error": "unauthorized"}), 403
-    body = request.get_json(silent=True) or {}
-    action = body.get("action") if isinstance(body, dict) else None
-    if action == "start":
-        return jsonify(lull.start_mic())
-    if action == "stop":
-        return jsonify(lull.stop_mic())
-    return jsonify({"error": "action must be start or stop"}), 400
+    print("[Lull] POST /lull/mic ignored. Hold the hotkey to record.")
+    return jsonify({
+        "error": "push-to-talk",
+        "recording": False,
+        "detail": "Hold the hotkey to record. Release it to send. This route does not open the microphone.",
+    }), 400
 
 
 @app.route("/lull", methods=["POST"])
@@ -1225,7 +1227,11 @@ def lull_trigger():
     if not lull.route_authorized(request.headers.get("X-Lull-Token"), request.args.keys()):
         print("[Lull] POST /lull refused.")
         return jsonify({"error": "unauthorized"}), 403
-    result = lull.trigger(origin="route")
+    body_in = request.get_json(silent=True) or {}
+    utterance = body_in.get("text") if isinstance(body_in, dict) else ""
+    if not isinstance(utterance, str):
+        utterance = ""
+    result = lull.trigger(origin="route", speech=utterance)
     status = result.get("status", 200)
     body = {key: result.get(key) for key in ("ok", "delivered", "source", "chat_count", "reason")}
     return jsonify(body), status
@@ -1870,12 +1876,11 @@ if __name__ == "__main__":
     eventsub_client = EventSubClient()
     eventsub_client.start()
 
-    # The hotkey is armed here. The microphone stays off until POST /lull/mic.
+    # Hold the hotkey to record. The microphone stays closed until that key goes down.
     try:
         lull.start_hotkey()
     except Exception as exc:
         print(f"[Lull] Hotkey did not start: {type(exc).__name__}")
-    print("[Lull] Microphone is off until you start it with POST /lull/mic.")
 
     try:
         app.run(

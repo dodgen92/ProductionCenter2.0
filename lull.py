@@ -1,8 +1,8 @@
 """On-demand talking-point coaching for Tyler.
 
-Nothing here listens, calls Gemini, or sends Discord until something explicit
-asks it to. The microphone worker starts only from start_mic(). The hotkey
-and POST /lull are the only triggers. Transcripts and chat lines stay in RAM.
+Hold the hotkey to record. Release it to transcribe that utterance, ask
+Gemini once, and send one Discord DM. The microphone stays closed the rest
+of the time. Speech and audio are dropped when the request finishes.
 
 This module does not import Benito and does not press keys in WoW.
 """
@@ -19,12 +19,14 @@ import requests
 
 from gemini_usage import gemini_usage
 
-# Last ~5 minutes of speech, last 3 minutes of chat.
-TRANSCRIPT_WINDOW = 300
-TRANSCRIPT_MAX = 400
+# Chat only. Speech is the one utterance from the key that was just released.
 CHAT_WINDOW = 180
 CHAT_MAX = 300
 CHAT_OUTPUT_MAX = 6
+# One hold cannot grow without a limit. 16 kHz, 45 seconds.
+SAMPLE_RATE = 16000
+MAX_UTTERANCE_SECONDS = 45
+MAX_SAMPLES = SAMPLE_RATE * MAX_UTTERANCE_SECONDS
 # Stay under Discord's 2000 character message limit.
 DISCORD_LIMIT = 1800
 DISCORD_API = "https://discord.com/api/v10"
@@ -152,7 +154,6 @@ class TriggerGate:
             self._last = None
 
 
-transcript = RollingLog(TRANSCRIPT_WINDOW, TRANSCRIPT_MAX, monotonic_now)
 chat = RollingLog(CHAT_WINDOW, CHAT_MAX, monotonic_now)
 gate = TriggerGate(monotonic_now)
 
@@ -407,14 +408,6 @@ def normalize(data, chats):
     return points, coached, source
 
 
-def transcript_text(now=None):
-    parts = [item for item in transcript.recent(now=now) if isinstance(item, str)]
-    text = " ".join(parts)
-    if len(text) > 4000:
-        text = text[-4000:]
-    return text
-
-
 def recent_chats(now=None):
     rows = []
     for item in chat.recent(now=now, limit=CHAT_OUTPUT_MAX):
@@ -465,6 +458,28 @@ def _response_text(response):
     return text or None
 
 
+def _log_gemini_http_error(response):
+    """Status and Gemini's error line only. No key, no URL, no speech."""
+
+    status = ""
+    message = ""
+    try:
+        body = response.json()
+        err = body.get("error") if isinstance(body, dict) else {}
+        if isinstance(err, dict):
+            status = str(err.get("status") or "")[:80]
+            message = str(err.get("message") or "")[:300]
+    except Exception:
+        message = ""
+    secret = (os.getenv("GEMINI_API_KEY") or "").strip()
+    if secret and secret in message:
+        message = message.replace(secret, "[redacted]")
+    print(
+        f"[Lull] Gemini http={response.status_code} "
+        f"model={gemini_model_name()} status={status} message={message}"
+    )
+
+
 def ask_gemini(speech, chats):
     """One Flash request. Returns (text or None, reason). Does not log the body."""
 
@@ -495,10 +510,10 @@ def ask_gemini(speech, chats):
         print(f"[Lull] Gemini request failed: {type(exc).__name__}")
         return None, "error"
     if response.status_code == 429:
-        print("[Lull] Gemini rate limited.")
+        _log_gemini_http_error(response)
         return None, "rate-limit"
     if response.status_code >= 400:
-        print(f"[Lull] Gemini returned {response.status_code}.")
+        _log_gemini_http_error(response)
         return None, "error"
     try:
         gemini_usage("lull", bump=True)
@@ -589,12 +604,17 @@ def _skipped(reason):
     }
 
 
-def trigger(origin="route"):
-    """One real coaching pass. Does not log the transcript, chat, or tokens."""
+def trigger(origin="route", speech=""):
+    """One coaching pass for this utterance. The text is not kept afterward.
+
+    A hotkey release with no words does not call Gemini. An explicit POST
+    still does, with an empty utterance when the body has no text.
+    """
 
     state = gate.try_begin()
     if state != "ok":
         return _skipped(state)
+    utterance = _collapse(speech, 4000)
     try:
         if not discord_configured():
             print("[Lull] Trigger skipped (not-configured).")
@@ -606,9 +626,14 @@ def trigger(origin="route"):
                 "reason": "not-configured",
                 "status": 503,
             }
-        speech = transcript_text()
         chats = recent_chats()
-        points, coached, source = compose(speech, chats)
+        if origin == "hotkey" and not utterance:
+            points = list(CANNED_POINTS)
+            coached = generic_coaching(chats)
+            source = "canned"
+            print("[Lull] No speech captured. Gemini was not called.")
+        else:
+            points, coached, source = compose(utterance, chats)
         message = format_dm(points, coached)
         delivered, detail = discord_dm(message)
         print(
@@ -624,6 +649,7 @@ def trigger(origin="route"):
             "status": 200 if delivered else 502,
         }
     finally:
+        utterance = ""
         gate.end()
 
 
@@ -675,14 +701,6 @@ def note_chat_event(event, now=None):
         return False
     user = _collapse(_chat_user(event), 64) or "chat"
     chat.add({"user": user, "text": text}, now=now)
-    return True
-
-
-def note_transcript(text, now=None):
-    cleaned = _collapse(text, 400)
-    if not cleaned:
-        return False
-    transcript.add(cleaned, now=now)
     return True
 
 
@@ -751,17 +769,16 @@ class SoundDeviceCapture:
         self._stream.start()
 
     def read(self, stop):
+        """One quarter-second chunk, so a key release is noticed quickly."""
+
         import numpy as np
 
-        chunks = []
-        for _ in range(10):
-            if stop.is_set():
-                return None
-            data, _overflow = self._stream.read(8000)
-            chunks.append(np.squeeze(data).copy())
-        if not chunks:
+        if stop.is_set():
             return None
-        return np.concatenate(chunks)
+        data, _overflow = self._stream.read(4000)
+        if stop.is_set():
+            return None
+        return np.squeeze(data).copy()
 
     def close(self):
         self._stream.stop()
@@ -788,7 +805,7 @@ class PyAudioCapture:
             if index is None:
                 self._pyaudio.terminate()
                 raise OSError("microphone name was not found")
-        self._chunk = 8000
+        self._chunk = 4000
         self._stream = self._pyaudio.open(
             format=pyaudio.paInt16,
             channels=1,
@@ -799,16 +816,16 @@ class PyAudioCapture:
         )
 
     def read(self, stop):
+        """One quarter-second chunk, so a key release is noticed quickly."""
+
         import numpy as np
 
-        frames = []
-        for _ in range(10):
-            if stop.is_set():
-                return None
-            frames.append(self._stream.read(self._chunk, exception_on_overflow=False))
-        if not frames:
+        if stop.is_set():
             return None
-        audio = np.frombuffer(b"".join(frames), dtype=np.int16).astype("float32")
+        frame = self._stream.read(self._chunk, exception_on_overflow=False)
+        if stop.is_set() or not frame:
+            return None
+        audio = np.frombuffer(frame, dtype=np.int16).astype("float32")
         return audio / 32768.0
 
     def close(self):
@@ -833,150 +850,202 @@ def open_default_capture(device):
         raise
 
 
-class MicWorker:
-    """Opt-in local transcription. Construction does not open a microphone."""
+def _sample_count(audio):
+    try:
+        return len(audio)
+    except TypeError:
+        return 0
 
-    def __init__(self, store, transcriber_factory=None, capture_factory=None):
-        self.transcript = store
+
+def _concat_audio(chunks):
+    if not chunks:
+        return None
+    first = chunks[0]
+    if hasattr(first, "shape"):
+        import numpy as np
+
+        return np.concatenate([np.asarray(chunk).reshape(-1) for chunk in chunks])
+    samples = []
+    for chunk in chunks:
+        samples.extend(list(chunk))
+    return samples
+
+
+def hotkey_name():
+    return (os.getenv("LULL_HOTKEY") or "f8").strip() or "f8"
+
+
+class PushToTalk:
+    """Record only while the hotkey is held. Release sends that utterance once.
+
+    Construction does not open a microphone or load the Whisper model.
+    """
+
+    def __init__(self, transcriber_factory=None, capture_factory=None, on_utterance=None):
         self.transcriber_factory = transcriber_factory or load_whisper
         self.capture_factory = capture_factory or open_default_capture
-        self._stop = threading.Event()
-        self._thread = None
+        self.on_utterance = on_utterance or (lambda text: trigger(origin="hotkey", speech=text))
         self._lock = threading.Lock()
-        self.active = False
-        self.status = "stopped"
-        self.model_name = ""
-        self.device_label = ""
+        self._stop = threading.Event()
+        self._state = "idle"
+        self._thread = None
+        self._finish_thread = None
+        self._audio = []
+        self._capture_error = None
+        self._model = None
+        self.recording = False
 
     def snapshot(self):
-        return {
-            "active": bool(self.active),
-            "status": self.status,
-            "model": self.model_name,
-            "device": self.device_label,
-        }
-
-    def start(self):
         with self._lock:
-            if self._thread is not None and self._thread.is_alive():
-                return self.snapshot()
+            return {
+                "recording": self._state == "recording",
+                "state": self._state,
+            }
+
+    def key_down(self):
+        """Start one recording. Repeats while the key is held do nothing."""
+
+        with self._lock:
+            if self._state != "idle":
+                return False
+            self._state = "recording"
+            self.recording = True
             self._stop.clear()
-            self.status = "starting"
-            self.active = False
+            self._audio = []
+            self._capture_error = None
             self._thread = threading.Thread(
-                target=self._run,
-                name="lull-mic",
+                target=self._record,
+                name="lull-ptt",
                 daemon=True,
             )
             self._thread.start()
-            return self.snapshot()
+            return True
 
-    def stop(self):
-        self._stop.set()
-        thread = self._thread
-        running = (
-            thread is not None
-            and thread.is_alive()
-            and thread is not threading.current_thread()
+    def key_up(self):
+        """Stop the recording and send it once. A second release does nothing."""
+
+        with self._lock:
+            if self._state != "recording":
+                return False
+            self._state = "sending"
+            self.recording = False
+            self._stop.set()
+            record_thread = self._thread
+        self._finish_thread = threading.Thread(
+            target=self._finish,
+            args=(record_thread,),
+            name="lull-ptt-send",
+            daemon=True,
         )
-        if running:
-            thread.join(timeout=3)
-        if thread is None or not thread.is_alive():
-            self.active = False
-            if self.status in ("listening", "starting"):
-                self.status = "stopped"
-        if not running:
-            self.active = False
-            self.status = "stopped"
-            self.transcript.clear()
-            print("[Lull] MIC STOPPED. Transcription is off and the rolling transcript was dropped.")
-        return self.snapshot()
+        self._finish_thread.start()
+        return True
 
-    def _run(self):
-        model_name = whisper_model_name()
-        self.model_name = model_name
-        device = (os.getenv("LULL_MIC_DEVICE") or "").strip()
-        self.device_label = device or "default"
-        try:
-            model = self.transcriber_factory(model_name)
-        except ImportError:
-            self.active = False
-            self.status = "missing-deps"
-            print("[Lull] MIC OFF. Optional packages are not installed. See requirements-lull.txt.")
-            return
-        except Exception as exc:
-            self.active = False
-            self.status = "missing-model"
-            print(f"[Lull] MIC OFF. Whisper model did not load ({type(exc).__name__}).")
-            return
+    def reset(self):
+        self._stop.set()
+        for thread in (self._thread, self._finish_thread):
+            if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+                thread.join(timeout=2)
+        with self._lock:
+            self._state = "idle"
+            self.recording = False
+            self._audio = []
+            self._capture_error = None
+
+    def _record(self):
         if self._stop.is_set():
-            self.active = False
-            self.status = "stopped"
             return
+        device = (os.getenv("LULL_MIC_DEVICE") or "").strip()
+        capture = None
+        opened = False
+        samples = 0
         try:
             capture = self.capture_factory(device)
-        except Exception as exc:
-            self.active = False
-            self.status = "no-mic"
-            print(f"[Lull] MIC OFF. No microphone ({type(exc).__name__}).")
-            return
-        self.active = True
-        self.status = "listening"
-        print(
-            f"[Lull] MIC ACTIVE. Transcribing from {self.device_label} "
-            f"with faster-whisper {model_name}. Audio stays in memory and is not saved. "
-            "Stop with POST /lull/mic action=stop."
-        )
-        try:
-            while not self._stop.is_set():
+            opened = True
+            print("[Lull] MIC OPEN. Recording while the key is held. Nothing is saved.")
+            while not self._stop.is_set() and samples < MAX_SAMPLES:
                 try:
                     audio = capture.read(self._stop)
                 except Exception as exc:
-                    print(f"[Lull] Microphone read failed: {type(exc).__name__}")
+                    self._capture_error = type(exc).__name__
                     break
-                if audio is None or self._stop.is_set():
+                if audio is None:
                     break
-                try:
-                    text = model.transcribe(audio)
-                except Exception as exc:
-                    print(f"[Lull] Transcription error: {type(exc).__name__}")
-                    continue
-                cleaned = _collapse(text, 400)
-                if cleaned:
-                    self.transcript.add(cleaned)
+                room = MAX_SAMPLES - samples
+                count = _sample_count(audio)
+                if count > room:
+                    audio = audio[:room]
+                    count = room
+                if count <= 0:
+                    break
+                self._audio.append(audio)
+                samples += count
+        except Exception as exc:
+            self._capture_error = type(exc).__name__
+            print(f"[Lull] MIC OFF. No microphone ({type(exc).__name__}).")
         finally:
-            self.active = False
-            closer = getattr(capture, "close", None)
-            if closer is not None:
-                try:
-                    closer()
-                except Exception as exc:
-                    print(f"[Lull] Microphone close failed: {type(exc).__name__}")
-            self.transcript.clear()
-            self.status = "stopped"
-            print("[Lull] MIC STOPPED. Transcription is off and the rolling transcript was dropped.")
+            if capture is not None:
+                closer = getattr(capture, "close", None)
+                if closer is not None:
+                    try:
+                        closer()
+                    except Exception as exc:
+                        print(f"[Lull] Microphone close failed: {type(exc).__name__}")
+            if not opened:
+                return
+            if samples >= MAX_SAMPLES:
+                print("[Lull] MIC CLOSED. The hold reached the time limit. Release the key to send it.")
+            else:
+                print("[Lull] MIC CLOSED.")
+
+    def _transcribe(self, audio):
+        if self._model is None:
+            self._model = self.transcriber_factory(whisper_model_name())
+        return self._model.transcribe(audio)
+
+    def _finish(self, record_thread):
+        if record_thread is not None:
+            record_thread.join(timeout=3)
+        text = ""
+        try:
+            if self._capture_error:
+                print(f"[Lull] Capture failed: {self._capture_error}")
+            else:
+                audio = _concat_audio(self._audio)
+                self._audio = []
+                if audio is not None and _sample_count(audio) > 0:
+                    try:
+                        text = self._transcribe(audio) or ""
+                    except ImportError:
+                        print("[Lull] Transcription needs the optional packages. See requirements-lull.txt.")
+                    except Exception as exc:
+                        print(f"[Lull] Transcription failed: {type(exc).__name__}")
+                audio = None
+            self._audio = []
+            cleaned = _collapse(text, 4000)
+            text = ""
+            try:
+                self.on_utterance(cleaned)
+            except Exception as exc:
+                print(f"[Lull] Trigger failed: {type(exc).__name__}")
+        finally:
+            self._audio = []
+            with self._lock:
+                self._state = "idle"
+                self.recording = False
 
 
-mic = MicWorker(transcript)
-
-
-def start_mic():
-    return mic.start()
-
-
-def stop_mic():
-    return mic.stop()
+talk = PushToTalk()
 
 
 def start_hotkey(keyboard_module=None):
-    """Arm the global hotkey. Pressing it is the trigger. Import does not arm it.
+    """Arm hold-to-talk. Import does not arm it and does not open the mic.
 
     On Windows the keyboard package uses a low-level hook, so the key still
-    fires while WoW is the focused window. suppress stays off, so WoW also
-    sees the key. Pick a key WoW is not using. Default is F9, not Benito's F8.
+    fires while WoW is the focused window. suppress stays off. Default is F8.
+    LULL_HOTKEY overrides that. This does not call Benito.
     """
 
-    name = (os.getenv("LULL_HOTKEY") or "f9").strip() or "f9"
+    name = hotkey_name()
     keyboard = keyboard_module
     if keyboard is None:
         try:
@@ -986,48 +1055,41 @@ def start_hotkey(keyboard_module=None):
             return False
         keyboard = keyboard_module
 
-    def _fire():
-        threading.Thread(
-            target=lambda: trigger(origin="hotkey"),
-            name="lull-hotkey",
-            daemon=True,
-        ).start()
+    def _down(_event=None):
+        talk.key_down()
+
+    def _up(_event=None):
+        talk.key_up()
 
     try:
-        keyboard.add_hotkey(name, _fire, suppress=False)
+        keyboard.on_press_key(name, _down, suppress=False)
+        keyboard.on_release_key(name, _up, suppress=False)
     except Exception as exc:
         print(f"[Lull] Could not bind hotkey: {type(exc).__name__}")
         return False
     print(
-        f"[Lull] Hotkey {name} is armed. Press it while WoW is focused. "
-        "It does nothing until you press it."
+        f"[Lull] Hold {name} to talk. Release it to send. "
+        "The microphone stays closed until the key goes down."
     )
     return True
 
 
 def status_snapshot():
-    hotkey = (os.getenv("LULL_HOTKEY") or "f9").strip() or "f9"
     return {
-        "mic": mic.snapshot(),
-        "hotkey": hotkey,
+        "mic": talk.snapshot(),
+        "hotkey": hotkey_name(),
         "chat_count": len(chat.recent(limit=CHAT_MAX)),
     }
 
 
 def reset_state():
-    """Drop RAM buffers and release the gate. Used by tests."""
+    """Drop chat, release the gate, and close a push-to-talk session."""
 
     gate.reset()
     chat.clear()
-    if mic._thread is None or not mic._thread.is_alive():
-        transcript.clear()
-        mic.active = False
-        mic.status = "stopped"
-        return
-    stop_mic()
+    talk.reset()
 
 
 if __name__ == "__main__":
     print("Lull Helper runs inside Server.py.")
-    print("The microphone stays off until you POST /lull/mic with action start.")
-    print("This command does not open a microphone, call Gemini, or send Discord.")
+    print("Hold the hotkey to record. Release it to send. This command does not open a microphone.")
