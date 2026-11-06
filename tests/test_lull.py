@@ -197,6 +197,89 @@ def test_fourth_point_stays_inside_talking_points():
     assert message.index("\n4. ") < message.index("**💬 CHAT")
 
 
+def test_parser_accepts_wrapped_json_and_rejects_a_cutoff():
+    """Prose, fences, and braces inside strings still yield the object. A cutoff does not."""
+
+    points = ["One.", "Two.", "Three.", 'brace {inside} and a quote " stays']
+    obj = json.dumps({"points": points, "chats": [], "decoy": "skip {this}"})
+    assert lull.parse_model_json(obj)["points"] == points
+    assert lull.parse_model_json("```json\n" + obj + "\n```")["points"] == points
+    assert lull.parse_model_json("Here you go:\n```json\n" + obj + "\n```\nDone.")["points"] == points
+    assert lull.parse_model_json("Sure.\n" + obj + "\nThanks.")["points"] == points
+    assert lull.parse_model_json(obj + "\nHope that helps.")["points"] == points
+    assert lull.parse_model_json('{"points":["One.","Two.","Three.","Four"') is None
+    wrapped_three = "prefix " + json.dumps({"points": ["A.", "B.", "C."]})
+    kept, _, source = lull.normalize(lull.parse_model_json(wrapped_three), [])
+    assert source == "partial"
+    assert kept[:3] == ["A.", "B.", "C."]
+    assert kept[3] == lull.LORE_UNAVAILABLE
+
+
+def test_thought_part_is_left_out_of_the_answer():
+    """A thought=true part is not concatenated in front of the JSON."""
+
+    obj = json.dumps({"points": ["A.", "B.", "C.", "Lore."], "chats": []})
+
+    class Response:
+        def json(self):
+            return {
+                "candidates": [{
+                    "finishReason": "STOP",
+                    "content": {"parts": [
+                        {"thought": True, "text": "secret thought {not the answer}"},
+                        {"text": "Note:\n" + obj},
+                    ]},
+                }],
+            }
+
+    text = lull._response_text(Response())
+    assert "secret thought" not in text
+    assert lull.parse_model_json(text)["points"] == ["A.", "B.", "C.", "Lore."]
+
+
+def test_truncated_json_logs_shape_without_the_utterance(monkeypatch, usage_file, capsys):
+    """A cut-off reply stays canned, with counters only, and is still one call."""
+
+    arm(monkeypatch, usage_file)
+    phrase = "secret utterance about the ridge"
+    body = {
+        "candidates": [{
+            "finishReason": "MAX_TOKENS",
+            "content": {"parts": [
+                {"thought": True, "text": phrase + " hidden thought {no}"},
+                {"text": '{"points":["' + phrase},
+            ]},
+        }],
+    }
+    calls = []
+
+    def fake_post(url, headers=None, json=None, timeout=None, **kwargs):
+        calls.append(url)
+        if "generativelanguage.googleapis.com" in url:
+            return FakeResponse(200, body)
+        if url.endswith("/users/@me/channels"):
+            return FakeResponse(200, {"id": "channel-1"})
+        if url.endswith("/messages"):
+            return FakeResponse(200, {"id": "message-1"})
+        raise AssertionError(url)
+
+    monkeypatch.setattr(lull.requests, "post", fake_post)
+    result = lull.trigger(origin="route", speech=phrase)
+    assert result["source"] == "canned"
+    assert sum("generativelanguage" in url for url in calls) == 1
+    logged = capsys.readouterr().out
+    assert "why=parse" in logged
+    assert "finish=MAX_TOKENS" in logged
+    assert "parts=2" in logged
+    assert "thought_parts=1" in logged
+    assert "lead=brace" in logged
+    assert "balanced=no" in logged
+    assert "text_chars=" in logged
+    assert phrase not in logged
+    assert "hidden thought" not in logged
+    assert GEMINI_KEY not in logged
+
+
 def test_partial_points_keep_coaching_and_do_not_log_the_utterance(monkeypatch, usage_file, capsys):
     """Three points stay. A blank fourth is unavailable. Bad JSON stays canned."""
 

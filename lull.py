@@ -358,19 +358,141 @@ def generic_coaching(chats):
     return rows
 
 
-def parse_model_json(text):
-    raw = (text or "").strip()
-    if raw.startswith("```"):
-        raw = re.sub(r"^```(?:json)?", "", raw, count=1).strip()
-        if raw.endswith("```"):
-            raw = raw[:-3].strip()
+def _loads_dict(text):
     try:
-        data = json.loads(raw)
+        data = json.loads(text)
     except json.JSONDecodeError:
         return None
-    if not isinstance(data, dict):
+    if isinstance(data, dict):
+        return data
+    return None
+
+
+def _balanced_object_slices(text):
+    """Complete `{...}` slices. Quotes and backslash escapes do not change depth.
+
+    A slice that never closes is omitted. Nothing is repaired.
+    """
+
+    slices = []
+    start = None
+    depth = 0
+    in_string = False
+    escape = False
+    for index, char in enumerate(text):
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            continue
+        if char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+            continue
+        if char == "}" and depth:
+            depth -= 1
+            if depth == 0 and start is not None:
+                slices.append(text[start:index + 1])
+                start = None
+    return slices
+
+
+def parse_model_json(text):
+    """A JSON object, including one wrapped in prose or a fence.
+
+    The whole string is tried first. Otherwise the first complete object that
+    contains `points` is used, then any other complete object. Truncated text
+    is not rebuilt.
+    """
+
+    raw = (text or "").strip()
+    if not raw:
         return None
-    return data
+    direct = _loads_dict(raw)
+    if direct is not None:
+        return direct
+    if raw.startswith("```"):
+        fenced = re.sub(r"^```(?:json)?", "", raw, count=1).strip()
+        if fenced.endswith("```"):
+            fenced = fenced[:-3].strip()
+        direct = _loads_dict(fenced)
+        if direct is not None:
+            return direct
+    found = []
+    for snippet in _balanced_object_slices(raw):
+        data = _loads_dict(snippet)
+        if data is not None:
+            found.append(data)
+    for data in found:
+        if "points" in data:
+            return data
+    if found:
+        return found[0]
+    return None
+
+
+def _text_lead(text):
+    stripped = (text or "").lstrip()
+    if stripped.startswith("```"):
+        return "fence"
+    if stripped.startswith("{"):
+        return "brace"
+    return "other"
+
+
+def _answer_shape(response, text):
+    """Counters only. The reply text itself is not included."""
+
+    finish = ""
+    part_count = 0
+    thought_parts = 0
+    try:
+        body = response.json()
+    except Exception:
+        body = None
+    if isinstance(body, dict):
+        candidates = body.get("candidates")
+        first = candidates[0] if isinstance(candidates, list) and candidates else None
+        if isinstance(first, dict):
+            finish = "".join(
+                char for char in str(first.get("finishReason") or "")
+                if char.isalnum() or char == "_"
+            )[:40]
+            content = first.get("content") if isinstance(first.get("content"), dict) else {}
+            part_list = content.get("parts") if isinstance(content.get("parts"), list) else []
+            part_count = len(part_list)
+            for part in part_list:
+                if isinstance(part, dict) and part.get("thought") is True:
+                    thought_parts += 1
+    return {
+        "finish": finish,
+        "parts": part_count,
+        "thought_parts": thought_parts,
+        "text_chars": len(text or ""),
+        "lead": _text_lead(text),
+        "balanced": "yes" if _balanced_object_slices(text or "") else "no",
+    }
+
+
+def _log_parse_failure(shape):
+    shape = shape or {}
+    finish = shape.get("finish") or "-"
+    print(
+        "[Lull] Gemini fallback why=parse "
+        f"finish={finish} "
+        f"parts={int(shape.get('parts') or 0)} "
+        f"thought_parts={int(shape.get('thought_parts') or 0)} "
+        f"text_chars={int(shape.get('text_chars') or 0)} "
+        f"lead={shape.get('lead') or 'other'} "
+        f"balanced={shape.get('balanced') or 'no'}"
+    )
 
 
 def _usable_points(raw):
@@ -497,7 +619,11 @@ def _response_text(response):
         return None
     chunks = []
     for part in parts:
-        if isinstance(part, dict) and isinstance(part.get("text"), str):
+        if not isinstance(part, dict):
+            continue
+        if part.get("thought") is True:
+            continue
+        if isinstance(part.get("text"), str):
             chunks.append(part["text"])
     text = "\n".join(chunks).strip()
     return text or None
@@ -530,9 +656,9 @@ def ask_gemini(speech, chats):
 
     api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
     if not api_key:
-        return None, "missing-key"
+        return None, "missing-key", None
     if over_cap():
-        return None, "cap"
+        return None, "cap", None
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
         f"{gemini_model_name()}:generateContent"
@@ -553,31 +679,32 @@ def ask_gemini(speech, chats):
         )
     except requests.RequestException as exc:
         print(f"[Lull] Gemini request failed: {type(exc).__name__}")
-        return None, "error"
+        return None, "error", None
     if response.status_code == 429:
         _log_gemini_http_error(response)
-        return None, "rate-limit"
+        return None, "rate-limit", None
     if response.status_code >= 400:
         _log_gemini_http_error(response)
-        return None, "error"
+        return None, "error", None
     try:
         gemini_usage("lull", bump=True)
     except Exception as exc:
         print(f"[Lull] Could not record Gemini usage: {type(exc).__name__}")
     text = _response_text(response)
+    shape = _answer_shape(response, text or "")
     if not text:
-        return None, "malformed"
-    return text, "gemini"
+        return None, "malformed", shape
+    return text, "gemini", shape
 
 
 def compose(speech, chats):
-    raw, reason = ask_gemini(speech, chats)
+    raw, reason, shape = ask_gemini(speech, chats)
     if raw is None:
         _log_fallback(_fallback_why(reason))
         return list(CANNED_POINTS), generic_coaching(chats), "canned"
     data = parse_model_json(raw)
     if data is None:
-        _log_fallback("parse")
+        _log_parse_failure(shape)
         return list(CANNED_POINTS), generic_coaching(chats), "canned"
     points, coached, source = normalize(data, chats)
     return points, coached, source
