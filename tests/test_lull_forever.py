@@ -1,5 +1,7 @@
 """Forever card lookup. No network."""
 
+import lull
+import lull_classic
 import lull_forever
 
 
@@ -21,7 +23,7 @@ def test_fakenews_stays_out_of_the_lore_and_drops():
 
     card = lull_forever.lookup_place("sfk", "forever")
     message = lull.render_guide(
-        card,
+        lull.notes_from_forever(card),
         "By the Light, I am still walking.",
         "(FAKENEWS) A producer renamed the keep after a sandwich.",
         [],
@@ -31,11 +33,19 @@ def test_fakenews_stays_out_of_the_lore_and_drops():
     assert "Archmage Arugal" in message[lore:dev]
     assert "(FAKENEWS)" not in message[:dev]
     assert "(FAKENEWS)" in message[dev:]
-    assert "No three verified drops are on the card" in message
+    assert "No three verified drops were named in the source text." in message
     assert "Soul Drain" in message
 
 
-def test_cards_do_not_invent_a_third_drop_when_none_are_checked():
+def test_fetch_page_failure_is_not_a_fact():
+    """A network error becomes no page, not a made-up extract."""
+
+    def boom(url, params):
+        raise OSError("offline")
+
+    lull_classic.clear_cache()
+    assert lull_classic.fetch_page("Westfall (Classic)", http_get=boom) is None
+    lull_classic.clear_cache()
     """These starter cards have no verified marquee loot rows."""
 
     for card in lull_forever.CARDS:

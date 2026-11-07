@@ -10,6 +10,7 @@ import pytest
 
 import gemini_usage
 import lull
+import lull_classic
 import lull_forever
 import Server
 
@@ -332,6 +333,94 @@ def test_model_cannot_inject_facts_and_drops_stay_at_three(monkeypatch, usage_fi
     logged = capsys.readouterr().out
     assert phrase not in logged
     assert GEMINI_KEY not in logged
+
+
+def test_deadmines_beats_westfall_and_uses_classic_text(monkeypatch, usage_file):
+    """A Westfall-plus-Deadmines sentence loads the Classic Deadmines page, not a miss."""
+
+    arm(monkeypatch, usage_file)
+    extract = (
+        "The Deadmines are tunnels under Westfall. Edwin VanCleef leads the Defias Brotherhood. "
+        "The Cruel Barb is a notable weapon. The Emberstone Staff is a caster drop. "
+        "Blackened Defias Armor is the mail chest people remember."
+    )
+    seen = {}
+
+    def fake_fetch(title, http_get=None, now=None):
+        seen["title"] = title
+        return {
+            "name": "Deadmines",
+            "title": title,
+            "extract": extract,
+            "url": "https://warcraft.wiki.gg/wiki/Deadmines_(Classic)",
+            "label": "Classic-era Warcraft Wiki. This may differ in World of Warcraft: Forever.",
+        }
+
+    monkeypatch.setattr(lull_classic, "fetch_page", fake_fetch)
+    calls = install_http(monkeypatch, {
+        "danger": ["Edwin VanCleef is building a ship in the mines."],
+        "rares": [],
+        "drops": [
+            {"name": "Cruel Barb", "why": "The rogue weapon from the instance.", "classes": "rogue"},
+            {"name": "Emberstone Staff", "why": "A caster weapon.", "classes": "caster"},
+            {"name": "Blackened Defias Armor", "why": "The mail chest.", "classes": "mail"},
+            {"name": "Thunderfury", "why": "Not in the page.", "classes": "any"},
+        ],
+        "lore": "Invented extra lore about a dragon bakery.",
+        "remy": "By the Light, I will swim anyway.",
+        "fakenews": "(FAKENEWS) A producer paved the mine with banana bread.",
+        "chats": [
+            {"reply": "First time? I'm an undead paladin. The Light and I have an arrangement."},
+            {"reply": "Tell them the whole raid plan."},
+        ],
+    })
+    lull.note_chat_event(chat_event("newguy", "what class is that?"), now=None)
+    lull.note_chat_event(chat_event("kev", "lol you died"), now=None)
+    speech = "Okay Im going to jump off the zeppelin and swim to Westfall, hopefully do Deadmines"
+    result = lull.trigger(origin="route", speech=speech)
+    assert seen["title"] == "Deadmines (Classic)"
+    assert result["source"] == "gemini"
+    assert len(gemini_calls(calls)) == 1
+    content = discord_messages(calls)[0]["json"]["content"]
+    assert "Deadmines" in content
+    assert "may differ in World of Warcraft: Forever" in content
+    assert "Cruel Barb" in content
+    assert "Emberstone Staff" in content
+    assert "Blackened Defias Armor" in content
+    assert "Thunderfury" not in content
+    assert "dragon bakery" not in content
+    assert "(FAKENEWS)" in content
+    assert content.index("**📖 LORE**") < content.index("(FAKENEWS)")
+    assert "Edwin VanCleef" in content
+    assert "what class is that?" in content
+    assert "lol you died" in content
+    assert "The Light and I have an arrangement" in content
+    assert "Tell them" not in content
+    assert "I caught that." in content
+
+
+def test_classic_page_failure_does_not_invent_facts(monkeypatch, usage_file):
+    """A failed Classic read does not fill the guide from the model."""
+
+    arm(monkeypatch, usage_file)
+
+    def fail_fetch(title, http_get=None, now=None):
+        return None
+
+    monkeypatch.setattr(lull_classic, "fetch_page", fail_fetch)
+    calls = install_http(monkeypatch, {
+        "danger": ["VanCleef waits below."],
+        "drops": [{"name": "Cruel Barb", "why": "A weapon.", "classes": "rogue"}],
+        "remy": "By the Light, the page did not load.",
+        "fakenews": "(FAKENEWS) The mine was cancelled for a sandwich.",
+    })
+    result = lull.trigger(origin="route", speech="swim to Westfall for Deadmines")
+    assert result["source"] == "gemini"
+    content = discord_messages(calls)[0]["json"]["content"]
+    assert "could not be loaded" in content
+    assert "VanCleef" not in content
+    assert "Cruel Barb" not in content
+    assert len(gemini_calls(calls)) == 1
 
 
 def test_chat_window_and_memory_cap(clock):
