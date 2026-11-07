@@ -10,6 +10,7 @@ import pytest
 
 import gemini_usage
 import lull
+import lull_forever
 import Server
 
 
@@ -87,6 +88,8 @@ def arm(monkeypatch, usage_file):
 
 def good_model_payload(points=None, chats=None):
     return {
+        "remy": "By the Light, I am still walking.",
+        "fakenews": "(FAKENEWS) A designer filed this forest under snacks.",
         "points": points or [
             "Ask chat what they are working on tonight.",
             "Do a Remy bit about the long road.",
@@ -147,22 +150,14 @@ def test_preview_layout_matches_the_overlay_sample():
 
     # Proves: the formatter produces the Discord layout Tyler asked for.
     message = lull.preview()["preview"]
-    assert message == (
-        "**🎙️ TALKING POINTS**\n"
-        "1. Ask chat what the longest walk they've ever done in WoW was, and whether it was worth it.\n"
-        "2. Do a Remy bit: a Forsaken paladin grumbling that he still has to walk everywhere.\n"
-        "3. Tell the backstory of this trip: what's waiting at Bandarion Keep, and what happened last time?\n"
-        "4. No lore or development note was available for this one.\n"
-        "\n"
-        "━━━━━━━━━━\n"
-        "**💬 CHAT (last 3 min)**\n"
-        "\n"
-        '**newguy:** "first time here, what class is that?"\n'
-        "➜ Welcome them, then explain why an undead paladin using the Light is lore-wild.\n"
-        "\n"
-        '**kev:** "lol you died to that elite earlier"\n'
-        "➜ Lean in and replay the death dramatically."
-    )
+    lore = message.index("**📖 LORE**")
+    dev = message.index("**🛠️ DEVELOPMENT**")
+    assert message.index("**⚠️ DANGER**") < lore < dev
+    assert "(FAKENEWS)" in message[dev:]
+    assert "(FAKENEWS)" not in message[:dev]
+    assert "Silverpine Forest" in message
+    assert "newguy" in message
+    assert "TALKING POINTS" not in message
 
 
 def test_empty_chat_says_no_new_chats():
@@ -280,54 +275,61 @@ def test_truncated_json_logs_shape_without_the_utterance(monkeypatch, usage_file
     assert GEMINI_KEY not in logged
 
 
-def test_partial_points_keep_coaching_and_do_not_log_the_utterance(monkeypatch, usage_file, capsys):
-    """Three points stay. A blank fourth is unavailable. Bad JSON stays canned."""
+def test_model_cannot_inject_facts_and_drops_stay_at_three(monkeypatch, usage_file, capsys):
+    """Checked card text is what the DM shows. A fourth drop is not added."""
 
     arm(monkeypatch, usage_file)
     phrase = "secret utterance about the ridge"
-    three = [
-        "Ask what they are farming tonight.",
-        "Do a Remy bit about the road.",
-        "Say where this character walks next.",
-    ]
-    calls = install_http(monkeypatch, good_model_payload(points=three))
-    missing = lull.trigger(origin="route", speech=phrase)
-    assert missing["source"] == "partial"
+    card = {
+        "id": "test-keep",
+        "edition": "forever",
+        "name": "Test Keep",
+        "priority": 2,
+        "aliases": ("test keep",),
+        "sources": ("https://www.wowhead.com/forever/zone=1/test-keep",),
+        "danger": ("The door hits hard.",),
+        "rares": ({
+            "name": "Old Snarl",
+            "detail": "Rare in the yard.",
+            "source": "https://www.wowhead.com/forever/zone=1/test-keep",
+        },),
+        "drops": (
+            {"name": "Oak Axe", "classes": "any", "why": "The weapon people remember.", "source": "https://www.wowhead.com/forever/item=1"},
+            {"name": "Reed Staff", "classes": "caster", "why": "The caster piece from the last boss.", "source": "https://www.wowhead.com/forever/item=2"},
+            {"name": "Iron Helm", "classes": "mail", "why": "The stamina helm.", "source": "https://www.wowhead.com/forever/item=3"},
+            {"name": "Extra Boot", "classes": "any", "why": "Must not be a fourth marquee drop.", "source": "https://www.wowhead.com/forever/item=4"},
+        ),
+        "lore": "The keep is a checked paragraph and nothing else.",
+        "development": {
+            "text": "A public note says the door was rebuilt.",
+            "source": "https://www.wowhead.com/forever/news/1",
+        },
+    }
+    monkeypatch.setattr(lull_forever, "lookup_place", lambda speech, edition=None: card)
+    calls = install_http(monkeypatch, {
+        "remy": "By the Light, I am still walking.",
+        "fakenews": "(FAKENEWS) This must not appear next to the sourced note.",
+        "drops": ["Sword of Lies"],
+        "lore": "Invented lore about King Zorp.",
+        "danger": ["A fabricated mechanic."],
+    })
+    result = lull.trigger(origin="route", speech="headed to test keep")
+    assert result["source"] == "gemini"
     assert len(gemini_calls(calls)) == 1
     content = discord_messages(calls)[0]["json"]["content"]
-    for line in three:
-        assert line in content
-    assert lull.LORE_UNAVAILABLE in content
-    assert "Add one well-known" not in content
-
-    lull.gate.reset()
-    calls = install_http(monkeypatch, good_model_payload(points=three + ["   "]))
-    blank = lull.trigger(origin="route", speech=phrase)
-    assert blank["source"] == "partial"
-    assert len(gemini_calls(calls)) == 1
-    blank_body = discord_messages(calls)[0]["json"]["content"]
-    assert three[0] in blank_body
-    assert lull.LORE_UNAVAILABLE in blank_body
-
-    lull.gate.reset()
-    lore = "Undead paladins are a known oddity in the Light's story."
-    calls = install_http(monkeypatch, good_model_payload(points=three + [lore]))
-    full = lull.trigger(origin="route", speech=phrase)
-    assert full["source"] == "gemini"
-    assert lore in discord_messages(calls)[0]["json"]["content"]
-    assert len(gemini_calls(calls)) == 1
-
-    lull.gate.reset()
-    calls = install_http(monkeypatch, model_payload='{"points":["' + phrase)
-    broken = lull.trigger(origin="route", speech=phrase)
-    assert broken["source"] == "canned"
-    assert len(gemini_calls(calls)) == 1
-    canned_body = discord_messages(calls)[0]["json"]["content"]
-    assert lull.CANNED_POINTS[0] in canned_body
-    assert phrase not in canned_body
+    assert "Oak Axe" in content
+    assert "Reed Staff" in content
+    assert "Iron Helm" in content
+    assert "Extra Boot" not in content
+    assert "Sword of Lies" not in content
+    assert "King Zorp" not in content
+    assert "fabricated mechanic" not in content
+    assert "The door hits hard." in content
+    assert "The keep is a checked paragraph and nothing else." in content
+    assert "A public note says the door was rebuilt." in content
+    assert "(FAKENEWS)" not in content
+    assert phrase not in content
     logged = capsys.readouterr().out
-    assert "why=point-count n=3" in logged
-    assert "why=parse" in logged
     assert phrase not in logged
     assert GEMINI_KEY not in logged
 
@@ -458,8 +460,7 @@ def test_invalid_json_and_http_errors_use_canned_points(clock, monkeypatch, usag
     result = lull.trigger(origin="route")
     assert result["source"] == "canned"
     content = discord_messages(calls)[0]["json"]["content"]
-    for point in lull.CANNED_POINTS:
-        assert point in content
+    assert lull.UNKNOWN_PLACE in content
     assert "what class is that?" in content
     assert len(gemini_calls(calls)) == 1
 
@@ -467,7 +468,7 @@ def test_invalid_json_and_http_errors_use_canned_points(clock, monkeypatch, usag
     calls = install_http(monkeypatch, status_code=500)
     result = lull.trigger(origin="route")
     assert result["source"] == "canned"
-    assert lull.CANNED_POINTS[0] in discord_messages(calls)[0]["json"]["content"]
+    assert lull.UNKNOWN_PLACE in discord_messages(calls)[0]["json"]["content"]
     assert len(gemini_calls(calls)) == 1
     mine, _total = gemini_usage.gemini_usage("lull")
     assert mine == 1
@@ -492,7 +493,7 @@ def test_missing_key_sends_canned_points_without_gemini(clock, monkeypatch, usag
     assert result["source"] == "canned"
     assert gemini_calls(calls) == []
     content = discord_messages(calls)[0]["json"]["content"]
-    assert lull.CANNED_POINTS[0] in content
+    assert lull.UNKNOWN_PLACE in content
     assert "No new chats." in content
 
 
@@ -673,7 +674,8 @@ def test_mode_does_not_use_the_network(client, monkeypatch):
     assert body["delivered"] is False
     assert body["source"] == "test"
     assert "newguy" in body["preview"]
-    assert "TALKING POINTS" in body["preview"]
+    assert "TALKING POINTS" not in body["preview"]
+    assert "Silverpine Forest" in body["preview"]
     forwarded = client.post(
         "/lull?test=1",
         headers={"X-Forwarded-For": "203.0.113.5"},
@@ -910,7 +912,8 @@ def test_empty_release_does_not_call_gemini_or_invent_speech(monkeypatch, usage_
     assert len(discord_messages(calls)) == 1
     content = discord_messages(calls)[0]["json"]["content"]
     assert "No new chats." in content
-    assert lull.CANNED_POINTS[0] in content
+    assert lull.UNKNOWN_PLACE in content
+    assert lull.REMY_UNAVAILABLE in content
 
 
 def test_recording_stops_at_the_sample_cap(monkeypatch):

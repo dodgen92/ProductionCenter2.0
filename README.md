@@ -319,7 +319,9 @@ In OBS, refresh the Fact Gnome browser source. Rerun the script when `facts.js` 
 
 ## 🎙️ Lull Helper
 
-On demand, Production Center DMs Tyler three short talking points plus coaching for recent Twitch chat. He reads that DM in Discord's in-game overlay. Hold the hotkey and talk. Release it and that utterance is transcribed, sent to Gemini once, and delivered. A quiet minute does not open the microphone and does not send a DM.
+On demand, Production Center DMs a World of Warcraft: Forever guide for the place Tyler just named. Hold the hotkey and talk. Release it and that utterance is transcribed, sent to Gemini once, and delivered on Discord. A quiet minute does not open the microphone and does not send a DM.
+
+Checked notes live in `lull_forever.py`. They cover Silverpine Forest and Shadowfang Keep only. Any other place is reported as not on the card list. Danger, rares, drops, and lore are copied from those notes and are not written by the model. The notes do not include three verified marquee drops, so that section says so instead of inventing items. If a card has no sourced development line, the development block is one joke marked `(FAKENEWS)`. Remy's line is a separate joke. `LULL_WOW_EDITION` blank means `forever`. Another value finds no cards. `LULL_MAX_OUTPUT_TOKENS` blank means 2048. `LULL_MODEL` still overrides the model id.
 
 The server imports without opening a mic, downloading a model, calling Gemini, or talking to Discord. Tests use fakes.
 
@@ -327,8 +329,8 @@ The server imports without opening a mic, downloading a model, calling Gemini, o
 
 - Audio exists only while the hotkey is held, and only up to 45 seconds. Release transcribes that take and then drops the samples and the text. There is no five-minute speech history and no recording file.
 - Chat lines from the existing EventSub socket stay in RAM for 3 minutes. The buffer is capped at 300 lines.
-- A release with words sends Gemini that utterance (capped) and at most 6 chat lines. The raw audio never leaves the machine. The Discord DM is the coaching text, not a copy of the utterance.
-- A release with silence or a mic/model error does not invent speech and does not call Gemini. The DM uses the canned points plus the real recent chats.
+- A release with words sends Gemini that utterance once. Facts in the DM come from the Forever cards, not from the model's prose. The raw audio never leaves the machine.
+- A release with silence or a mic/model error does not invent a place. The DM says the place is unknown when nothing was heard, and it does not call Gemini.
 - Logs do not include the utterance, the chat text, the bot token, the Gemini key, or the trigger token. A failed Gemini call logs the HTTP status, the model id, and Gemini's short error line with the key removed if it appears there.
 
 Speech and chat are untrusted data in the prompt. They cannot change the Discord recipient, the token, or what the route is allowed to do. The recipient is `LULL_DISCORD_USER_ID` only.
