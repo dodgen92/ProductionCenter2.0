@@ -9,6 +9,7 @@ const MAXLEN=200,HOLD=Math.max(4,+(g('duration')||6))*1000;
 const MUTE=g('tts')==='0',BROWSER_TTS=!MUTE&&'speechSynthesis' in window,LIVE=!MUTE&&g('livetts')!=='0';
 const VOICE=g('voice')||'en-HK-SamNeural',RATE=g('rate')||'-5%',PITCH=g('pitch')||'+0Hz';
 const VOL=Math.min(1,Math.max(0,+(g('vol')||1)));
+const GAIN=window.WidgetGain?WidgetGain.gainFromParams(P):1;
 const SAY_NAME=g('sayname')!=='0';
 const stage=document.getElementById('stage'),$=id=>document.getElementById(id);
 const side=(g('side')||'left').toLowerCase()==='right'?'right':'left';
@@ -47,7 +48,9 @@ async function speakLive(text,el){
  await new Promise((ok,bad)=>{a.onloadedmetadata=ok;a.onerror=()=>bad(new Error('bad audio'));setTimeout(()=>bad(new Error('metadata timeout')),4000);});
  let an=null,buf=null;
  try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();if(actx.state==='suspended')await actx.resume();
-  const src=actx.createMediaElementSource(a);an=actx.createAnalyser();an.fftSize=1024;buf=new Uint8Array(an.fftSize);src.connect(an);an.connect(actx.destination);}catch(e){an=null;}
+  if(window.WidgetGain){const h=WidgetGain.attach(a,GAIN,{url:url,analyse:true,context:actx,pageHref:location.href,pageOrigin:location.origin});
+   if(h&&h.ctx)actx=h.ctx;if(h&&h.routed&&h.analyser){an=h.analyser;buf=new Uint8Array(h.analyser.fftSize||1024);}}
+ }catch(e){an=null;}
  return new Promise((resolve,reject)=>{
   let done=false,raf=0,lvl=0;
   const fin=()=>{if(done)return;done=true;cancelAnimationFrame(raf);if(el)el.textContent=text;stage.classList.remove('talk','lips');talkEl.style.transform='';URL.revokeObjectURL(url);resolve();};
@@ -70,7 +73,7 @@ function speakBrowser(text,el){
   stage.classList.add('talk');
   const tk=setInterval(()=>{const n=Math.floor(text.length*(Date.now()-t0)/est);if(el)el.textContent=text.slice(0,n);if(!BROWSER_TTS&&n>=text.length)fin();},40);
   const sf=setTimeout(fin,est*2+3000);if(!BROWSER_TTS)return;
-  try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='en-GB';u.rate=.92;u.volume=VOL;
+  try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='en-GB';u.rate=.92;u.volume=VOL; // browser speech cannot take gain above 1
    const vs=speechSynthesis.getVoices()||[];const v=vs.find(v=>/en-(HK|SG|IN|GB)/i.test(v.lang))||vs.find(v=>/^en/i.test(v.lang));if(v)u.voice=v;
    u.onend=fin;u.onerror=()=>setTimeout(fin,Math.max(0,est-(Date.now()-t0)));speechSynthesis.speak(u);
    setTimeout(()=>{if(!done&&!speechSynthesis.speaking&&!speechSynthesis.pending)setTimeout(fin,Math.max(0,est-(Date.now()-t0)));},1500);

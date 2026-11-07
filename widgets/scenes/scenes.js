@@ -31,9 +31,12 @@ function rotate(id,lines,ms){var e=$(id),i=0;if(!e||!lines||!lines.length)return
  setInterval(function(){e.classList.add('out');setTimeout(function(){i=(i+1)%lines.length;e.innerHTML=esc(lines[i]);e.classList.remove('out')},600)},ms||8000)}
 
 // Procedural tavern ambience (WebAudio, no audio files). ?ambience=0 mutes, ?avol=0.35
+// avol is not clamped. gain (default 1, clamped 0..4) multiplies that master. Omit gain and the bed matches the old level.
 var AMB=(function(){if(Q.get('ambience')==='0')return{duck:function(){}};
  var A;try{A=new (window.AudioContext||window.webkitAudioContext)()}catch(e){return{duck:function(){}}}
- var vol=Q.has('avol')?+Q.get('avol'):.35,M=A.createGain();M.gain.value=vol;M.connect(A.destination);
+ var vol=Q.has('avol')?+Q.get('avol'):.35;
+ var boost=window.WidgetGain?WidgetGain.gainFromParams(Q):1;
+ var master=vol*boost,M=A.createGain();M.gain.value=master;M.connect(A.destination);
  var nb=A.createBuffer(1,A.sampleRate*2,A.sampleRate),d=nb.getChannelData(0),l=0;for(var i=0;i<d.length;i++){var w=Math.random()*2-1;l=(l+.02*w)/1.02;d[i]=l*3.5}
  function noise(){var s=A.createBufferSource();s.buffer=nb;s.loop=true;return s}
  // fire bed: brown noise lowpassed
@@ -47,4 +50,4 @@ var AMB=(function(){if(Q.get('ambience')==='0')return{duck:function(){}};
  (function cr(){if(Math.random()<.7)pop();if(Math.random()<.2)setTimeout(pop,40);setTimeout(cr,80+Math.random()*600)})();
  (function ev(){setTimeout(function(){Math.random()<.6?clink():slosh();ev()},9000+Math.random()*14000)})();
  function resume(){if(A.state!=='running')A.resume().catch(function(){})}resume();setInterval(resume,2000);
- return{duck:function(on){M.gain.setTargetAtTime(on?vol*.3:vol,A.currentTime,.4)},ctx:A}})();
+ return{duck:function(on){M.gain.setTargetAtTime(on?master*.3:master,A.currentTime,.4)},ctx:A}})();

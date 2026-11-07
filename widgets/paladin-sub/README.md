@@ -24,7 +24,7 @@ Edit the wording in `lines.js` (open it in Notepad). Change `text`. Leave `file`
 
 The bubble and the line stay up until the mp3 ends (`ended`). If the file fails to load, he gives up after about 6 seconds so the next alert is not stuck. There is also a 90 second cap if a clip starts and never ends. Alerts that arrive while he is talking wait. They do not play on top of each other.
 
-The music is already mixed into each file in `audio/`, including the follow lines. One mp3 is the whole alert. `?vol=` is the volume of that file, 0 to 1, default 0.8. `?sound=0` mutes it. The line text still shows, for the normal alert time. In OBS, tick **Control audio via OBS** so it shows up in the mixer.
+The music is already mixed into each file in `audio/`, including the follow lines. One mp3 is the whole alert. `?vol=` is the trim of that file, 0 to 1, default 0.8. `?gain=` is a linear Web Audio boost after that trim, default 1, clamped to 0–4. Use `gain=1.6` (~+4 dB) in the OBS URL. `gain=2.5` (~+8 dB) pushes the hottest shipped takes (peaks around -4.9 dB, already played at 0.8) over full scale. A `file://` page cannot take the boost and keeps `vol`. `?sound=0` mutes it. The line text still shows, for the normal alert time. In OBS, tick **Control audio via OBS** so it shows up in the mixer.
 
 `sounds/sounds.js` is only a fallback for an alert that has no voice line. Follows with no follow line stay silent. Leave that list empty.
 

@@ -11,7 +11,8 @@ if(g('y')){root.setProperty('--y',px(g('y')));root.setProperty('--b','auto');}
 if(g('w'))root.setProperty('--w',px(g('w')));
 if(g('h'))root.setProperty('--h',px(g('h')));
 if(g('size'))root.setProperty('--size',px(g('size')));
-if(g('opacity'))root.setProperty('--opacity',g('opacity'));
+// ?opacity= used to fade the panel. It is ignored. The panel and tabs stay solid #000
+// so the in-game chat cannot show through. Line colors are unchanged.
 if(g('tab1'))document.getElementById('tab1').textContent=g('tab1');
 if(g('tab2'))document.getElementById('tab2').textContent=g('tab2');
 const lines=document.getElementById('lines');

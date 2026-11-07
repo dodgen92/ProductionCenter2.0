@@ -24,6 +24,13 @@ const clean=s=>String(s||'').replace(/[\u0000-\u001f\u007f<>&"'`]/g,'').trim().s
 
 // ---- sounds: fallback mp3 from sounds/ when this alert has no voice line ----
 const SOUND_ON=g('sound')!=='0',VOL=Math.min(1,Math.max(0,g('vol')==null?0.8:+g('vol')));
+const GAIN=window.WidgetGain?WidgetGain.gainFromParams(P):1;
+function armAlert(audio,src){
+  if(!window.WidgetGain||!audio) return;
+  const url=src||audio.src||'';
+  if(!WidgetGain.routable(url,location.href,location.origin)) return;
+  try{WidgetGain.attach(audio,GAIN,{url:url,pageHref:location.href,pageOrigin:location.origin});}catch(e){}
+}
 let sounds=(Array.isArray(window.PALADIN_SOUNDS)?window.PALADIN_SOUNDS:[]).map(f=>String(f).trim()).filter(Boolean).map(f=>'sounds/'+encodeURI(f));
 if(SOUND_ON&&!sounds.length){const found=[];let pending=50;
   for(let n=1;n<=50;n++){const a=new Audio();a.preload='metadata';
@@ -33,7 +40,7 @@ if(SOUND_ON&&!sounds.length){const found=[];let pending=50;
 let lastSnd=-1;
 function playSound(){if(!SOUND_ON||!sounds.length)return;
   let i=Math.floor(Math.random()*sounds.length);if(sounds.length>1&&i===lastSnd)i=(i+1)%sounds.length;lastSnd=i;
-  const a=new Audio(sounds[i]);a.volume=VOL;a.play().catch(e=>console.warn('paladin sound',e));
+  const a=new Audio(sounds[i]);a.volume=VOL;armAlert(a,sounds[i]);a.play().catch(e=>console.warn('paladin sound',e));
   window.paladinSub&&(window.paladinSub.lastSound=sounds[i]);}
 
 // ---- voice lines (lines.js): one recorded take per alert ----
@@ -64,6 +71,7 @@ function playVoice(entry){
     let settled=false;
     const audio=new Audio('audio/'+encodeURI(entry.file));
     audio.volume=VOL;
+    armAlert(audio,'audio/'+encodeURI(entry.file));
     let cap=setTimeout(finish,90000);
     function finish(){
       if(settled)return;

@@ -4,8 +4,9 @@ Reads your Twitch chat directly over anonymous, read-only Twitch IRC (`wss://irc
 
 ## OBS setup
 1. Add a **Browser Source** → Local file → `index.html`, then add `?channel=YOURNAME` (untick "Local file" and use `file:///path/to/wow-chat/index.html?channel=YOURNAME` so the parameter sticks).
-2. Width 1920, height 1080; keep OBS's default transparent CSS.
-3. Preview without going live with `?test=1`.
+2. Width 1920, height 1080; keep OBS's default transparent CSS. The page outside the chat box stays transparent. Only the panel and the tab strip are black, so this source does not cover the whole game.
+3. Place the box over the in-game chat. Defaults are `x=20`, bottom `110`, `w=540`, `h=240`. If that rectangle is smaller than the WoW chat window, or it sits beside it, game text outside the rectangle still shows. Change `x`, `y`, `w`, and `h` until the black box covers that window. Leave a little room above the box for the tab strip.
+4. Preview without going live with `?test=1`. An old `opacity` value in the URL does not make the box see-through.
 
 ## URL params
 | Param | Default | Meaning |
@@ -13,7 +14,7 @@ Reads your Twitch chat directly over anonymous, read-only Twitch IRC (`wss://irc
 | `channel` (alias `twitch`) | required | Twitch channel to read. If it's missing, a small hint appears in the panel |
 | `x`,`y`,`w`,`h` | 20, (bottom 110), 540, 240 | Panel position/size in px. `y` = top offset; without it the panel sits bottom-left |
 | `size` | 16 | Font size px |
-| `opacity` | 0.85 | Panel opacity |
+| `opacity` | ignored | Older URLs may still say `opacity=0.85`. That value no longer fades the box. The panel, the tabs, and the strip behind the tabs are solid `#000` so the game chat cannot show through. Text keeps its own colors |
 | `tab1`,`tab2` | General, Combat Log | Tab labels |
 | `fade` | 30 | Seconds before lines fade (0 = never) |
 | `max` | 12 | Max lines |
