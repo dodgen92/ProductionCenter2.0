@@ -13,6 +13,7 @@ const MUTE=g('tts')==='0',TTS=!MUTE&&'speechSynthesis' in window;
 const LIVE=!MUTE&&USE_SERVER&&g('livetts')!=='0',LIVE_VOICE=g('voice')||'en-US-AriaNeural',LIVE_RATE=g('rate')||'+8%',LIVE_PITCH=g('pitch')||'+10Hz';
 const num=(v,d)=>{const n=parseFloat(v);return isFinite(n)&&!/[%a-z]/i.test(v||'')?n:d;};
 const VOICE=(g('voice')||'').toLowerCase().replace(/^[a-z]{2}-[a-z]{2}-/,'').replace(/neural$/,''),RATE=num(g('rate'),1),PITCH=num(g('pitch'),1.3),VOL=Math.min(1,Math.max(0,+(g('vol')||1)));
+const GAIN=window.WidgetGain?WidgetGain.gainFromParams(P):1;
 const stage=document.getElementById('stage');
 const factEl=document.getElementById('fact'),whoEl=document.getElementById('who'),learnEl=document.getElementById('learn');
 const pos=(g('pos')||'br').toLowerCase();if(['bl','br','tl','tr'].includes(pos))stage.className=pos;
@@ -84,7 +85,7 @@ function speakBrowser(fact){
       speechSynthesis.cancel();
       const u=new SpeechSynthesisUtterance(fact);
       if(voice){u.voice=voice;u.lang=voice.lang;}else u.lang='en-US';
-      u.rate=RATE;u.pitch=PITCH;u.volume=VOL;
+      u.rate=RATE;u.pitch=PITCH;u.volume=VOL; // browser speech cannot take gain above 1
       u.onboundary=e=>{boundary=true;const ci=e.charIndex||0,m=fact.slice(ci).match(/^\S+/);show(ci+(m?m[0].length:0));};
       u.onend=finish;u.onerror=()=>{clearTimeout(safety);safety=setTimeout(finish,Math.max(0,estMs-(Date.now()-t0)));};
       speechSynthesis.speak(u);
@@ -117,7 +118,9 @@ async function playBlob(fact,blob){
   await new Promise((ok,bad)=>{a.onloadedmetadata=ok;a.onerror=()=>bad(new Error('bad audio'));setTimeout(()=>bad(new Error('metadata timeout')),4000);});
   let an=null,buf=null;
   try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();if(actx.state==='suspended')await actx.resume();
-    const src=actx.createMediaElementSource(a);an=actx.createAnalyser();an.fftSize=1024;buf=new Uint8Array(an.fftSize);src.connect(an);an.connect(actx.destination);}catch(e){console.warn('analyser off',e);an=null;}
+    if(window.WidgetGain){const h=WidgetGain.attach(a,GAIN,{url:url,analyse:true,context:actx,pageHref:location.href,pageOrigin:location.origin});
+      if(h&&h.ctx)actx=h.ctx;if(h&&h.routed&&h.analyser){an=h.analyser;buf=new Uint8Array(h.analyser.fftSize||1024);}}
+  }catch(e){console.warn('analyser off',e);an=null;}
   return new Promise((resolve,reject)=>{
     let done=false,raf=0,lvl=0;window.__gnomeLip=0;
     const fin=()=>{if(done)return;done=true;cancelAnimationFrame(raf);factEl.textContent=fact;stage.classList.remove('talk','lips');talkEl.style.transform='';URL.revokeObjectURL(url);resolve();};

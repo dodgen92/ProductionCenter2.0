@@ -26,7 +26,8 @@ A painted gnome scholar (pink pigtails, teal coat, glowing tome) pops up in an a
 | `rate` | +8% | Live TTS speed, e.g. `%2B20%25` (= +20%) |
 | `pitch` | +10Hz | Live TTS pitch, e.g. `%2B35Hz` |
 | `livetts` | on | `0` = skip the server, use the Windows voice only |
-| `vol` | 1 | Voice volume (0–1) |
+| `vol` | 1 | Voice trim (0–1). Still capped at 1 |
+| `gain` | 1 | Linear Web Audio boost after `vol`, clamped to 0–4. Use `gain=1.6` (~+4 dB) as the starting OBS value. `gain=2.5` (~+8 dB) clips the hottest shipped line (`gnome_01.mp3` peaks around -4.4 dB). Browser `speechSynthesis` cannot take this boost |
 | `tts` | on | `0` = silent, text only |
 | `prerec` | on | `0` = skip the recorded lines and use live `/tts` |
 | `pos` | br | `br`, `bl`, `tr`, `tl` |
@@ -35,7 +36,7 @@ A painted gnome scholar (pink pigtails, teal coat, glowing tome) pops up in an a
 | `test` / `once` | off | `test=1` fake redemptions; `once=1` only one |
 
 ## Recorded lines
-`voice/voices.js` maps each exact string in `facts/facts.js` to a file under `voice/`. The shipped lines are Ed's Kokoro takes (voice `af_nicole`, sped up and pitched): `gnome_01.mp3` through `gnome_25.mp3`, one per fact, in that order. They sit around -21.5 LUFS. Leave them at that level. The widget does not turn them up.
+`voice/voices.js` maps each exact string in `facts/facts.js` to a file under `voice/`. The shipped lines are Ed's Kokoro takes (voice `af_nicole`, sped up and pitched): `gnome_01.mp3` through `gnome_25.mp3`, one per fact, in that order. They sit around -21.5 LUFS, with the hottest peak around -4.4 dB. Leave the files at that level. The widget does not rewrite them. `gain=1.6` turns playback up without touching the mp3. `gain=2.5` is enough to clip `gnome_01.mp3`.
 
 The key has to match the fact character for character, or that line never plays and she falls through to `/tts`. To swap one line, replace the mp3 (keeping the same name is fine) or point the existing key at a new path. Do not change the key text, and do not edit the fact in `facts.js` to match an old recording. To rebuild every line on this PC, run `python widgets/fact-gnome/tools/make_gnome_voices.py` (see the project README). That writes hash-named wavs and replaces `voices.js`. Those wavs are gitignored. The mp3s stay in the folder, but she only plays files the manifest names. Copy `voices.js` aside before a rebuild if you still want the shipped mp3s.
 

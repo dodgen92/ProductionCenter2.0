@@ -26,7 +26,8 @@ traditional/zh-tw/tw/繁體, german/deutsch/de, dutch/nederlands/nl, and flag em
 | `rewardtoid` / `rewardfromid` | | match by reward id instead |
 | `side` | `left` | `left` (bottom-left) or `right` |
 | `tts` | on | `tts=0` = silent, text only |
-| `vol` | `1` | 0..1 |
+| `vol` | `1` | Trim, 0..1. Still capped at 1 |
+| `gain` | `1` | Linear Web Audio boost after `vol` for `/tts` audio, clamped to 0–4. Use `gain=1.6`. Browser speech cannot take it. Live TTS peaks are not the gnome files, so listen before leaving `gain=2.5` on |
 | `duration` | `9` | min seconds on screen |
 | `scale` | `1` | size |
 | `test` | | `test=1` cycles fake redemptions every 14 s (`once=1` = one) |

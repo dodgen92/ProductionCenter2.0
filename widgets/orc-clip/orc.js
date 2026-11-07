@@ -14,6 +14,8 @@ const MUTED=g('muted')==='1';
 // Clip <video> volume, 0 to 1. Change 0.8 to taste. ?cvol= overrides it.
 // The voice line is VVOL, not this. The Twitch iframe has no volume setting.
 const CVOL=Math.min(1,Math.max(0,g('cvol')==null?0.8:+g('cvol')));
+// Linear boost after vvol/cvol. Missing gain= stays at 1. OBS URLs can set 1.6.
+const GAIN=window.WidgetGain?WidgetGain.gainFromParams(P):1;
 const MAXDUR=Math.max(5,+(g('maxdur')||60));
 const BUFFER=Math.max(0,+(g('buffer')||5)); // seconds added for the embed to load + start (measured ~5-7s in headless Chrome)
 // parent= must match the page's hostname. Over http(s) use our own hostname; from file:// fall back to localhost (see README).
@@ -62,6 +64,8 @@ function playVideo(src,evDur){return new Promise(res=>{const v=$('vid');let done
   v.onloadedmetadata=()=>{const real=isFinite(v.duration)&&v.duration>0?v.duration:0;
     const d=Math.min(MAXDUR,(+evDur>0?+evDur:real||30))+BUFFER;cap=setTimeout(()=>fin('timeout'),d*1000);
     const bd=Math.min(MAXDUR,real||+evDur||30);bar.style.transition='none';bar.style.width='0';void bar.offsetWidth;bar.style.transition='width '+bd+'s linear';bar.style.width='100%';};
+  const routed=armMedia(v,src,false);
+  if(routed&&routed.reason==='captured-cross-origin'){fin('error');return;}
   v.muted=MUTED;v.volume=CVOL;v.src=src;
   const pr=v.play();if(pr)pr.then(()=>{window.orcClip.vplay='ok';}).catch(e=>{window.orcClip.vplay=String(e.name||e);console.warn('orc clip play',e);
     // autoplay with sound refused: retry muted so at least the picture plays
@@ -81,6 +85,8 @@ function holdVideo(src){return new Promise(res=>{const v=$('vid');let done=false
     const pr=v.play();setTimeout(snap,500);
     if(pr&&pr.then)pr.then(snap).catch(snap);else snap();
   };
+  const routed=armMedia(v,src,false);
+  if(routed&&routed.reason==='captured-cross-origin'){fin(false);return;}
   v.volume=0;v.muted=true;v.preload='auto';v.src=src;
 });}
 // Same ending rules as playVideo, but the file is already loaded and paused.
@@ -91,12 +97,26 @@ function startHeldVideo(evDur){return new Promise(res=>{const v=$('vid');let don
   const real=isFinite(v.duration)&&v.duration>0?v.duration:0;
   const d=Math.min(MAXDUR,(+evDur>0?+evDur:real||30))+BUFFER;cap=setTimeout(()=>fin('timeout'),d*1000);
   const bd=Math.min(MAXDUR,real||+evDur||30);bar.style.transition='none';bar.style.width='0';void bar.offsetWidth;bar.style.transition='width '+bd+'s linear';bar.style.width='100%';
+  armMedia(v,v.currentSrc||v.src||'',false);
   v.muted=MUTED;v.volume=CVOL;
   const pr=v.play();if(pr)pr.then(()=>{window.orcClip.vplay='ok';}).catch(e=>{window.orcClip.vplay=String(e.name||e);console.warn('orc clip play',e);
     if(e&&e.name==='NotAllowedError'){v.muted=true;v.play().catch(()=>fin('error'));}else fin('error');});
 });}
 let actx=null;
-function sameOrigin(u){try{return new URL(u,location.href).origin===location.origin&&location.origin!=='null';}catch(e){return false;}}
+// Route same-origin media through one gain node. A cross-origin URL on a fresh element
+// stays on native output. The shared <video> cannot go back to native output after the
+// first same-origin clip, so a later cross-origin file is refused and the iframe can play.
+function armMedia(el,src,analyse){
+  if(!window.WidgetGain||!el) return null;
+  const can=WidgetGain.routable(src,location.href,location.origin);
+  if(el._widgetGain&&el._widgetGain.source&&!can) return {routed:false,reason:'captured-cross-origin'};
+  if(!can) return null;
+  try{
+    const h=WidgetGain.attach(el,GAIN,{url:src,analyse:!!analyse,context:actx||undefined,pageHref:location.href,pageOrigin:location.origin});
+    if(h&&h.ctx) actx=h.ctx;
+    return h;
+  }catch(e){return null;}
+}
 // Drop the music-bed tail quickly so it does not sit on top of the clip.
 function fadeTail(a){const from=a.volume;let step=0;const id=setInterval(()=>{step+=1;
   try{a.volume=Math.max(0,from*(1-step/8));}catch(e){}
@@ -107,10 +127,11 @@ function playVoice(src,opts){opts=opts||{};return new Promise(res=>{if(!src)retu
   const voiceEnd=+opts.voiceEnd;
   const fin=ok=>{if(done)return;done=true;clearTimeout(t);clearTimeout(endTimer);cancelAnimationFrame(raf);lip.style.transform='';stage.classList.remove('lips');res(ok);};
   const t=setTimeout(()=>{try{a.pause();}catch(_){}fin(true);},20000); // hard cap on a voice line
-  // audio-synced bounce: only when the mp3 is same-origin (served by the Production Center), else CSS sway
+  // Lip-sync uses a silent analyser tap. The gain node is the only path to the speakers.
+  // A cross-origin voice line stays on the audio element at vvol. That path cannot go above 1.
   let an=null,buf=null;
-  if(sameOrigin(src)){try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();if(actx.state==='suspended')actx.resume();
-    const s=actx.createMediaElementSource(a);an=actx.createAnalyser();an.fftSize=1024;buf=new Uint8Array(an.fftSize);s.connect(an);an.connect(actx.destination);}catch(e){an=null;}}
+  const heard=armMedia(a,src,true);
+  if(heard&&heard.routed&&heard.analyser){an=heard.analyser;buf=new Uint8Array(heard.analyser.fftSize||1024);}
   const frame=()=>{if(done)return;an.getByteTimeDomainData(buf);let s=0;for(let i=0;i<buf.length;i++){const v=(buf[i]-128)/128;s+=v*v;}
     const v=Math.min(1,Math.sqrt(s/buf.length)*6);lvl+=(v-lvl)*(v>lvl?.6:.25);window.orcClip.lip=(window.orcClip.lip||0)+1;
     lip.style.transform=`translateY(${-lvl*9}px) scale(${1+lvl*.025},${1+lvl*.02}) rotate(${Math.sin(a.currentTime*5)*lvl*1.5}deg)`;raf=requestAnimationFrame(frame);};

@@ -3,16 +3,20 @@
 <h1 id="title">BE RIGHT BACK</h1><div class="line" id="tag">Enjoy these classic Remyfriend moments</div></div>
 <div id="player" class="panel"><i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i><i class="gem"></i><video id="v" playsinline></video></div>
 <div id="cap">From the channel • YouTube @moderemyd</div>
-<script src="scenes.js"></script><script>
+<script src="../audio-gain.js"></script><script src="scenes.js"></script><script>
 var side=Q.get('side')==='right'?'right':'left';$('player').classList.add(side);$('cap').classList.add(side);
 if(Q.get('cap')!=null)setText('cap',Q.get('cap'));if(Q.get('cap')==='')$('cap').style.display='none';
 if(Q.get('tagline')!=null)setText('tag',Q.get('tagline'));
 var P=$('player');P.classList.add('hide');setTimeout(function(){P.classList.remove('hide');startShorts()},1000*(Q.has('shortdelay')?+Q.get('shortdelay'):10));
 var v=$('v'),vol=Q.has('vol')?+Q.get('vol'):.6;v.volume=Math.max(0,Math.min(1,vol));v.muted=Q.get('mute')==='1';
+var shortGain=window.WidgetGain?WidgetGain.gainFromParams(Q):1;
+function armShort(src){if(!window.WidgetGain)return;var can=WidgetGain.routable(src,location.href,location.origin);
+ if(v._widgetGain&&v._widgetGain.source){if(can)WidgetGain.attach(v,shortGain,{url:src,context:(window.AMB&&AMB.ctx)||undefined,pageHref:location.href,pageOrigin:location.origin});return;}
+ if(!can)return;try{WidgetGain.attach(v,shortGain,{url:src,context:(window.AMB&&AMB.ctx)||undefined,pageHref:location.href,pageOrigin:location.origin});}catch(e){}}
 var dir=Q.get('dir')||'brb/shorts/',list=[],bag=[],last=null,fails=0;
 function shuffle(){bag=list.slice();for(var i=bag.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),t=bag[i];bag[i]=bag[j];bag[j]=t}if(bag.length>1&&bag[0]===last)bag.push(bag.shift())}
 function next(){if(!list.length)return ph();if(fails>=list.length)return ph();if(!bag.length)shuffle();last=bag.shift();window.BRB_NOW=last;(window.BRB_LOG=window.BRB_LOG||[]).push(last);
- v.src=dir+encodeURI(last);v.play().catch(function(){v.muted=true;v.play().catch(function(){})})}
+ v.src=dir+encodeURI(last);armShort(v.src);v.play().catch(function(){v.muted=true;v.play().catch(function(){})})}
 v.addEventListener('ended',function(){fails=0;AMB.duck(false);next()});v.addEventListener('playing',function(){fails=0;AMB.duck(!v.muted)});v.addEventListener('pause',function(){AMB.duck(false)});
 v.addEventListener('error',function(){fails++;list=list.filter(function(x){return x!==last});next()});
 function ph(){v.style.display='none';if($('ph'))return;var p=$('player');

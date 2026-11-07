@@ -15,7 +15,8 @@ ponders (head tilt, tea steam speeds up, thinking dots), then speaks his answer 
 | `reward` | `Ask the Monk` | reward title (`rewardid=` to match by id) |
 | `side` | `left` | `right` mirrors |
 | `tts` | `1` | `0` = silent, text types out |
-| `vol` | `1` | 0-1 |
+| `vol` | `1` | Trim, 0-1. Still capped at 1 |
+| `gain` | `1` | Linear Web Audio boost after `vol` for `/tts` audio, clamped to 0–4. Use `gain=1.6`. Browser speech cannot take it |
 | `voice` | `en-HK-SamNeural` | any allowlisted edge-tts voice |
 | `rate` / `pitch` | `-5%` / `+0Hz` | |
 | `sayname` | `1` | `0` = read only the question, not "NAME asks:" |

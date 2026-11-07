@@ -157,6 +157,16 @@ Do not point a test at real Twitch or a live OBS. If a test needs a file, use py
 
 `test_play_a_clip_publishes_clip_and_voice_line` in `test_examples.py` still covers the embed fallback (an empty library). The new file covers the index, the top-5 merge, the 24 hour WoW request, a local `video_url`, and `GET /clips`.
 
+## Widget gain and the chat mask
+
+`tests/test_widget_gain.js` checks the shared boost and the chat CSS with Node's test runner. It uses a fake `AudioContext`. It does not open OBS, Twitch, or a sound device.
+
+```bash
+node --test tests/test_widget_gain.js
+```
+
+`gain` defaults to 1. `1.6` and `2.5` pass through. `9` becomes 4. A bad value becomes 1. A cross-origin URL does not call `createMediaElementSource`. A reused element is armed once. The analyser tap does not go to the speakers. The chat panel stays `#000` even though `chat.js` no longer applies `opacity`.
+
 ## Paladin voice lines
 
 `tests/test_paladin_alerts.py` checks two things without opening a browser.
