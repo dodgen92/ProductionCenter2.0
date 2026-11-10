@@ -121,7 +121,7 @@ def test_welcome_message_creates_subscriptions(monkeypatch):
     # Assert: one Helix call per event type, all tied to this session.
     assert result == "welcome"
     assert client.keepalive_timeout == 12
-    assert len(posts) == 8
+    assert len(posts) == 7
     types = [item["json"]["type"] for item in posts]
     assert types == [
         "channel.channel_points_custom_reward_redemption.add",
@@ -131,7 +131,6 @@ def test_welcome_message_creates_subscriptions(monkeypatch):
         "channel.subscription.message",
         "channel.cheer",
         "channel.raid",
-        "channel.chat.message",
     ]
     for item in posts:
         assert item["url"] == Server.EVENTSUB_URL
@@ -151,14 +150,6 @@ def test_welcome_message_creates_subscriptions(monkeypatch):
     raid = posts[6]["json"]
     assert raid["version"] == "1"
     assert raid["condition"] == {"to_broadcaster_user_id": "12345"}
-    # Chat is read as the broadcaster. That user id is the token's user.
-    # Same condition as Benito PR #14, so the two branches share one subscription.
-    chat_sub = posts[7]["json"]
-    assert chat_sub["version"] == "1"
-    assert chat_sub["condition"] == {
-        "broadcaster_user_id": "12345",
-        "user_id": "12345",
-    }
 
 
 def test_notification_publishes_to_events(monkeypatch):
