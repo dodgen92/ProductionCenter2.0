@@ -1255,6 +1255,57 @@ def log_revocation(data):
     )
 
 
+TITLE_LIMIT = 140
+CHANNELS_URL = "https://api.twitch.tv/helix/channels"
+
+
+def clean_stream_title(text):
+    """Strip, censor, and cap a viewer title. Empty means do not call Helix."""
+
+    title = censor_viewer_text(str(text or "")).strip()
+    if not title:
+        return ""
+    return title[:TITLE_LIMIT]
+
+
+def set_stream_title(text):
+    """Set the channel title from a redemption. Does not log the broadcaster token."""
+
+    title = clean_stream_title(text)
+    if not title:
+        print("[Server] Change Stream Title ignored. The viewer did not enter a title.")
+        return False
+    if not TWITCH_CLIENT_ID or not TWITCH_OAUTH_TOKEN or not BROADCASTER_USER_ID:
+        print("[Server] Change Stream Title skipped. Client id, broadcaster token, or broadcaster id is missing.")
+        return False
+    url = f"{CHANNELS_URL}?broadcaster_id={quote(str(BROADCASTER_USER_ID), safe='')}"
+    try:
+        response = requests.patch(
+            url,
+            headers={
+                "Client-ID": TWITCH_CLIENT_ID,
+                "Authorization": f"Bearer {TWITCH_OAUTH_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={"title": title},
+            timeout=15,
+        )
+    except requests.RequestException as exc:
+        print(f"[Server] Change Stream Title failed: {type(exc).__name__}")
+        return False
+    if response.status_code in (401, 403):
+        print(
+            f"[Server] Change Stream Title refused: {response.status_code}. "
+            "The token needs channel:manage:broadcast."
+        )
+        return False
+    if response.status_code != 204:
+        print(f"[Server] Change Stream Title failed: {response.status_code}")
+        return False
+    print(f"[Server] Stream title updated: {title}")
+    return True
+
+
 def route_channel_point_reward(event):
     """Send a redemption to its effect. Existing titles stay an exact match."""
 
@@ -1295,6 +1346,14 @@ def route_channel_point_reward(event):
                 event.get("user_login") or "",
                 reward_title if isinstance(reward_title, str) else "",
             ),
+            daemon=True,
+        ).start()
+
+    elif isinstance(reward_title, str) and reward_title.strip().lower() == "change stream title":
+        print(f"📝 Change Stream Title redeemed by {event.get('user_name') or username}!")
+        Thread(
+            target=set_stream_title,
+            args=(event.get("user_input") or "",),
             daemon=True,
         ).start()
 
