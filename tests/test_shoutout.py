@@ -83,6 +83,8 @@ def ready(monkeypatch):
         monkeypatch.setattr(Server.requests, "get", helix.get)
         monkeypatch.setattr(Server.requests, "post", helix.post)
         monkeypatch.setattr(lull, "post_chat", helix.chat)
+        with Server._shouted_lock:
+            Server._shouted_out.clear()
         box["helix"] = helix
         return helix
 
@@ -171,6 +173,30 @@ def test_names_in_the_chat_line_are_censored(monkeypatch, ready):
         "Go check out **** at twitch.tv/cool_channel1! (shoutout from ****)"
     ]
     assert "nope" not in helix.chats[0]
+
+
+@pytest.mark.parametrize(
+    "again",
+    ["COOL_CHANNEL1", "@Cool_Channel1", "https://www.twitch.tv/Cool_Channel1/"],
+)
+def test_repeat_channel_gets_a_note_and_no_second_shoutout(ready, capsys, again):
+    helix = ready(Helix(user={
+        "id": "999",
+        "login": "cool_channel1",
+        "display_name": "Cool_Channel1",
+    }))
+
+    assert Server.shoutout_channel("cool_channel1", "RemyFriend") is True
+    helix.calls.clear()
+    helix.chats.clear()
+
+    assert Server.shoutout_channel(again, "SomeoneElse") is False
+
+    output = capsys.readouterr().out
+    assert helix.calls == []
+    assert helix.chats == ["cool_channel1 already got a shoutout this stream!"]
+    assert "Go check out" not in "".join(helix.chats)
+    assert "cool_channel1 already got a shoutout this stream" in output
 
 
 def test_reward_title_starts_one_thread(monkeypatch):

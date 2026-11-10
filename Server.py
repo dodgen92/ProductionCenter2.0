@@ -1313,6 +1313,9 @@ _TWITCH_URL = re.compile(
 )
 SHOUTOUTS_URL = "https://api.twitch.tv/helix/chat/shoutouts"
 USERS_URL = "https://api.twitch.tv/helix/users"
+# Logins already shouted out this process. A restart starts a new stream.
+_shouted_out = set()
+_shouted_lock = threading.Lock()
 
 
 def clean_channel_login(text):
@@ -1366,6 +1369,12 @@ def shoutout_channel(text, redeemer=""):
     if not login:
         print("[Server] Shoutout ignored. That is not a channel name.")
         return False
+    with _shouted_lock:
+        already = login in _shouted_out
+    if already:
+        print(f"[Server] Shoutout skipped. {login} already got a shoutout this stream.")
+        lull.post_chat(censor_viewer_text(f"{login} already got a shoutout this stream!"))
+        return False
     if not TWITCH_CLIENT_ID or not TWITCH_OAUTH_TOKEN or not BROADCASTER_USER_ID:
         print("[Server] Shoutout skipped. Client id, broadcaster token, or broadcaster id is missing.")
         return False
@@ -1416,12 +1425,16 @@ def shoutout_channel(text, redeemer=""):
     if response.status_code in (400, 429):
         reason = _error_message(response) or str(response.status_code)
         print(f"[Server] Shoutout not sent: {response.status_code}. {reason}")
+        with _shouted_lock:
+            _shouted_out.add(login)
         lull.post_chat(_shoutout_chat(display, login, redeemer))
         return False
     if response.status_code != 204:
         print(f"[Server] Shoutout failed: {response.status_code}")
         return False
     print(f"[Server] Shoutout sent to {login}.")
+    with _shouted_lock:
+        _shouted_out.add(login)
     lull.post_chat(_shoutout_chat(display, login, redeemer))
     return True
 
