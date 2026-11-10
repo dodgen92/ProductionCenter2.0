@@ -1306,6 +1306,126 @@ def set_stream_title(text):
     return True
 
 
+_LOGIN = re.compile(r"^[a-z0-9_]{4,25}$")
+_TWITCH_URL = re.compile(
+    r"^(?:https?://)?(?:[a-z0-9-]+\.)?twitch\.tv/",
+    re.IGNORECASE,
+)
+SHOUTOUTS_URL = "https://api.twitch.tv/helix/chat/shoutouts"
+USERS_URL = "https://api.twitch.tv/helix/users"
+
+
+def clean_channel_login(text):
+    """Turn viewer text into a Twitch login, or '' when it is not one."""
+
+    raw = str(text or "").strip()
+    while raw.startswith("@"):
+        raw = raw[1:].strip()
+    raw = _TWITCH_URL.sub("", raw, count=1)
+    raw = raw.split("/")[0].split("?")[0].split("#")[0].strip()
+    login = raw.lower()
+    if not _LOGIN.fullmatch(login):
+        return ""
+    return login
+
+
+def _helix_headers():
+    return {
+        "Client-ID": TWITCH_CLIENT_ID,
+        "Authorization": f"Bearer {TWITCH_OAUTH_TOKEN}",
+    }
+
+
+def _error_message(response):
+    reason = ""
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    if isinstance(body, dict):
+        reason = str(body.get("message") or "")
+    reason = " ".join(reason.split())[:120]
+    token = TWITCH_OAUTH_TOKEN or ""
+    if token and token in reason:
+        reason = reason.replace(token, "").strip()
+    return reason
+
+
+def _shoutout_chat(display_name, login, redeemer):
+    name = " ".join(censor_viewer_text(display_name or "").split()) or login
+    who = " ".join(censor_viewer_text(redeemer or "").split()) or "a viewer"
+    shown_login = " ".join(censor_viewer_text(login or "").split()) or login
+    line = f"Go check out {name} at twitch.tv/{shown_login}! (shoutout from {who})"
+    return line[:500]
+
+
+def shoutout_channel(text, redeemer=""):
+    """Look up a channel and send a shoutout. Does not log the broadcaster token."""
+
+    login = clean_channel_login(text)
+    if not login:
+        print("[Server] Shoutout ignored. That is not a channel name.")
+        return False
+    if not TWITCH_CLIENT_ID or not TWITCH_OAUTH_TOKEN or not BROADCASTER_USER_ID:
+        print("[Server] Shoutout skipped. Client id, broadcaster token, or broadcaster id is missing.")
+        return False
+    try:
+        found = requests.get(
+            f"{USERS_URL}?login={quote(login, safe='')}",
+            headers=_helix_headers(),
+            timeout=15,
+        )
+    except requests.RequestException as exc:
+        print(f"[Server] Shoutout lookup failed: {type(exc).__name__}")
+        return False
+    if found.status_code in (401, 403):
+        print(
+            f"[Server] Shoutout refused: {found.status_code}. "
+            "The token needs moderator:manage:shoutouts."
+        )
+        return False
+    if found.status_code != 200:
+        print(f"[Server] Shoutout lookup failed: {found.status_code}")
+        return False
+    try:
+        data = (found.json().get("data") or [None])[0]
+    except ValueError:
+        data = None
+    if not isinstance(data, dict) or not data.get("id"):
+        print(f"[Server] Shoutout skipped. No channel named {login}.")
+        lull.post_chat(censor_viewer_text(f"Couldn't find twitch.tv/{login}."))
+        return False
+    target_id = str(data.get("id"))
+    display = str(data.get("display_name") or login)
+    url = (
+        f"{SHOUTOUTS_URL}?from_broadcaster_id={quote(str(BROADCASTER_USER_ID), safe='')}"
+        f"&to_broadcaster_id={quote(target_id, safe='')}"
+        f"&moderator_id={quote(str(BROADCASTER_USER_ID), safe='')}"
+    )
+    try:
+        response = requests.post(url, headers=_helix_headers(), timeout=15)
+    except requests.RequestException as exc:
+        print(f"[Server] Shoutout failed: {type(exc).__name__}")
+        return False
+    if response.status_code in (401, 403):
+        print(
+            f"[Server] Shoutout refused: {response.status_code}. "
+            "The token needs moderator:manage:shoutouts."
+        )
+        return False
+    if response.status_code in (400, 429):
+        reason = _error_message(response) or str(response.status_code)
+        print(f"[Server] Shoutout not sent: {response.status_code}. {reason}")
+        lull.post_chat(_shoutout_chat(display, login, redeemer))
+        return False
+    if response.status_code != 204:
+        print(f"[Server] Shoutout failed: {response.status_code}")
+        return False
+    print(f"[Server] Shoutout sent to {login}.")
+    lull.post_chat(_shoutout_chat(display, login, redeemer))
+    return True
+
+
 def route_channel_point_reward(event):
     """Send a redemption to its effect. Existing titles stay an exact match."""
 
@@ -1354,6 +1474,14 @@ def route_channel_point_reward(event):
         Thread(
             target=set_stream_title,
             args=(event.get("user_input") or "",),
+            daemon=True,
+        ).start()
+
+    elif isinstance(reward_title, str) and reward_title.strip().lower() == "shoutout a channel":
+        print(f"📣 Shoutout redeemed by {event.get('user_name') or username}!")
+        Thread(
+            target=shoutout_channel,
+            args=(event.get("user_input") or "", event.get("user_name") or ""),
             daemon=True,
         ).start()
 

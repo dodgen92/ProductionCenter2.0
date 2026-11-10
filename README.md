@@ -18,6 +18,7 @@ Widgets on this PC (the Fact Gnome, the translator, the orc, end credits) read o
 | **Start** / **Stop** | Starts or stops an auto-clipping loop that creates Twitch clips on a timer and posts each one to a Discord channel. |
 | **Play a Clip** | Plays a random mp4 from the local clip library (top 10 World of Warcraft clips plus the top 5 clips across Twitch, downloaded when the server starts). The orc speaks the recorded line for that clip's place in the list (WoW #1, Twitch #3, and so on). `voice_lines/orc/` is only used when a clip has no matching line. The orc widget gets a `clip` event. If the library is empty, it falls back to a Twitch embed of a top WoW clip and still sends that clip's place in the list. The title match ignores case. Rename it with `CLIP_REWARD_TITLE` if you want. |
 | **Change Stream Title** | Sets the channel title to the text the viewer entered. The match ignores case. Turn on "Require viewer to enter text." The text is censored, then cut at 140 characters. A blank redeem is ignored. |
+| **Shoutout a Channel** | Sends an official shoutout to the channel the viewer typed, and the bot posts a short chat line. The match ignores case. Turn on "Require viewer to enter text." A missing channel gets a chat note and no shoutout. |
 | **Translate to English** / **Translate from English** | Not handled inside the reward `if` chain. Every redemption is published on `/events` (including the viewer's text). The translator widget sees those and calls `/translate` and `/tts`. Create both rewards with "Require viewer to enter text" turned on. |
 
 Follows, subs, resubs, gifted subs, and cheers are published on the same feed and collected for the end-credits roll.
@@ -91,7 +92,7 @@ The JSON body sets the transport to `websocket` and includes the `session_id` fr
 `TWITCH_OAUTH_TOKEN` must be a **user** access token for the broadcaster. An **app** access token will not work for these WebSocket subscriptions. Generate a new user token when you add scopes. With the [Twitch CLI](https://dev.twitch.tv/docs/cli/):
 
 ```bash
-twitch token -u -s "channel:read:redemptions moderator:read:followers channel:read:subscriptions bits:read channel:manage:broadcast"
+twitch token -u -s "channel:read:redemptions moderator:read:followers channel:read:subscriptions bits:read channel:manage:broadcast moderator:manage:shoutouts"
 ```
 
 Put the access token in `TWITCH_OAUTH_TOKEN` and the app's client id in `TWITCH_CLIENT_ID`.
@@ -103,11 +104,12 @@ Put the access token in `TWITCH_OAUTH_TOKEN` and the app's client id in `TWITCH_
 | `channel:read:subscriptions` | Subs, resubs, and gifted subs |
 | `bits:read` | Cheers (`channel.cheer` v1) |
 | `channel:manage:broadcast` | Change Stream Title (`PATCH /helix/channels`) |
+| `moderator:manage:shoutouts` | Shoutout a Channel (`POST /helix/chat/shoutouts`) |
 | (none) | Incoming raids (`channel.raid` v1) |
 
 Follow v2 also sends `moderator_user_id`. This server sets that to `BROADCASTER_USER_ID`, so the token has to belong to the broadcaster (you are always a mod on your own channel).
 
-Incoming raids are subscribed with `to_broadcaster_user_id` only. Twitch documents `channel.raid` as needing no authorization. Do not also send `from_broadcaster_user_id` on that subscription. Twitch rejects the request when both are set. Follows still need `moderator:read:followers`, cheers still need `bits:read`, and Change Stream Title needs `channel:manage:broadcast` on this same broadcaster token. If the log shows 401 or 403, make a new token with every scope in the command above.
+Incoming raids are subscribed with `to_broadcaster_user_id` only. Twitch documents `channel.raid` as needing no authorization. Do not also send `from_broadcaster_user_id` on that subscription. Twitch rejects the request when both are set. Follows still need `moderator:read:followers`, cheers still need `bits:read`, Change Stream Title needs `channel:manage:broadcast`, and Shoutout a Channel needs `moderator:manage:shoutouts` on this same broadcaster token. If the log shows 401 or 403, make a new token with every scope in the command above.
 
 Play a Clip does **not** use that user token. It uses an app token from `clips.py` (`client_credentials`), which needs `TWITCH_CLIENT_ID` plus `TWITCH_CLIENT_SECRET` (the client secret from the Twitch developer console). Reading clips does not add another scope on the user token.
 
@@ -117,9 +119,9 @@ Play a Clip does **not** use that user token. It uses an app token from `clips.p
 2. Delete `WEBHOOK_URL` and `EVENTSUB_SECRET` from `.env`. The server does not read them anymore. You can uninstall ngrok.
 3. Run `python unsubscribe.py` once. That deletes subscriptions left over from the old webhook, including any that still point at an old public address. WebSocket subscriptions also end when the server disconnects.
 4. Set `TWITCH_CLIENT_SECRET` to the app client secret. `clips.py` reads that for Play a Clip. If you leave it blank, `clips.py` still falls back to `SECRET`. Keep `SECRET` when that fallback is the client secret you still use.
-5. `TWITCH_OAUTH_TOKEN` must be a **user** token for your channel with every scope in the command above. An app token will not create the WebSocket subscriptions. A token that only has `channel:read:redemptions` will keep redemptions working and Twitch will reject the other subscriptions (the server prints the error and keeps going). Change Stream Title uses this same token. A 401 or 403 on that reward means the token is missing `channel:manage:broadcast`.
+5. `TWITCH_OAUTH_TOKEN` must be a **user** token for your channel with every scope in the command above. An app token will not create the WebSocket subscriptions. A token that only has `channel:read:redemptions` will keep redemptions working and Twitch will reject the other subscriptions (the server prints the error and keeps going). Change Stream Title and Shoutout a Channel use this same token. A 401 or 403 on the title means the token is missing `channel:manage:broadcast`. A 401 or 403 on a shoutout means it is missing `moderator:manage:shoutouts`.
 6. Leave `EVENTSUB_WS_URL` blank for real Twitch. Set it only when you point the client at the Twitch CLI mock (see below).
-7. Create the channel point rewards in the Creator Dashboard (table above). Titles for the old rewards must match exactly. **Play a Clip** and **Change Stream Title** ignore case. Change Stream Title must require the viewer to enter text.
+7. Create the channel point rewards in the Creator Dashboard (table above). Titles for the old rewards must match exactly. **Play a Clip**, **Change Stream Title**, and **Shoutout a Channel** ignore case. Change Stream Title and Shoutout a Channel must require the viewer to enter text.
 8. Ranked orc lines ship in `widgets/orc-clip/audio/` (`lines.js` holds the words and timing). `voice_lines/orc/` is only the fallback for a clip with no rank. With zero fallback files the clip event is still published and `voice_line` is empty. The clip event also includes `reward` (the channel-point title) so a widget can filter on `?reward=`.
 9. Widgets now live in the `widgets/` folder in this repo. Delete `WIDGETS_DIR` from `.env`, or leave it blank, to serve those. Keep the old line only if you still want the Desktop folder (`C:\Users\tyler\Desktop\Stream-Widgets`) instead.
 10. Run `pip install -r requirements.txt` again so `yt-dlp` is installed. Play a Clip uses it to save mp4 files. Optional: `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` for `/tts?engine=eleven`. Optional: `DEEPL_API_KEY` as the last translation fallback. Optional: add lines to `banned_words.txt`.
@@ -127,6 +129,8 @@ Play a Clip does **not** use that user token. It uses an app token from `clips.p
 `/translate` tries, in order: Google's free `translate.googleapis.com` `client=gtx` endpoint (no key), then [MyMemory](https://mymemory.translated.net/) (no key), then DeepL only if `DEEPL_API_KEY` is set. The Google endpoint is unofficial. It can change or rate-limit, which is why the fallbacks exist.
 
 Manual check for Change Stream Title, after the new broadcaster token is in `.env` and the server is running: create the reward **Change Stream Title** with viewer text required, redeem it with a short title, and confirm the channel title changes. The console prints `Stream title updated`. A blank redeem prints `ignored` and does not call Helix. `401` or `403` means that token still needs `channel:manage:broadcast`.
+
+Manual check for Shoutout a Channel: create **Shoutout a Channel** with viewer text required. Go live, redeem it with a real channel name (a login, `@login`, or a `twitch.tv/login` link), and confirm Twitch shows the shoutout and the bot posts `Go check out ...`. Redeem a name that does not exist and the bot should say that channel was not found. A `429` or `400` (offline, or the two-minute / one-hour limit) still posts the chat line. `401` or `403` means the broadcaster token needs `moderator:manage:shoutouts`.
 
 ## 🚀 How to run it
 
