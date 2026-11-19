@@ -18,3 +18,6 @@ html,body{margin:0;padding:0;background:transparent;width:1920px;height:1080px;o
 .ts{opacity:.75}
 #hint{position:absolute;left:8px;top:8px;color:#FFD100;font-size:14px;text-shadow:1px 1px 0 #000}
 @keyframes in{from{opacity:0;transform:translateY(5px)}to{opacity:1}}
+.src{display:inline-block;margin-right:.35em;padding:0 .22em;border:1px solid currentColor;border-radius:2px;font-size:.68em;font-weight:700;letter-spacing:.03em;line-height:1.2;vertical-align:.12em;text-shadow:none}
+.src.yt{color:#FF4D4D;border-color:#FF4D4D}
+.src.kick{color:#53FC18;border-color:#53FC18}

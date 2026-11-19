@@ -315,6 +315,25 @@ pip install -r requirements-dev.txt
 pytest -v
 ```
 
+## YouTube and Kick chat
+
+The WoW chat widget still reads Twitch from anonymous IRC in the browser. Flask reads YouTube and Kick from StreamElements Astro (`wss://astro.streamelements.com`) and the widget polls `GET /wow-chat/feed`. The token stays in this process. It is not in the OBS URL.
+
+Names in `.env` (see `.env.example`):
+
+| Name | Required? | What it is |
+|---|---|---|
+| `STREAMELEMENTS_TOKEN` | For YouTube and Kick | JWT, or a comma-separated list if each platform needs its own. Blank skips Astro. The server still starts. |
+| `STREAMELEMENTS_TOKEN_TYPE` | No | `jwt` (default), `apikey` (Overlay Token), or `oauth2`. |
+| `STREAMELEMENTS_CHANNEL_ID` | When subscribe needs a room | StreamElements Account ID. One id is reused for every token. Several ids pair with the tokens in order. |
+| `STREAMELEMENTS_ENABLED` | No | `0`, `false`, `no`, or `off` skips Astro even with a token. Blank is on only when a token is set. |
+
+Copy the JWT from the StreamElements dashboard: avatar in the top-right, your channel, then the token. The Account ID on that channel page is the room. Turn on Show secrets for the JWT. The Overlay Token is in the same place (`STREAMELEMENTS_TOKEN_TYPE=apikey`). A token is for the platform account you copied it from. If YouTube and Kick do not arrive on one token, paste both, separated by commas. StreamElements only sees a public YouTube stream.
+
+Twitch messages from Astro are ignored, because IRC already draws them. YouTube and Kick lines get a small `YT` or `K` tag. `fade` and `max` on the widget URL apply to those lines too. Viewer text goes through `banned_words.txt` and the widget escapes it.
+
+`widgets/wow-chat/README.md` has the OBS URL. With no token, or with Flask stopped, refresh the browser source and Twitch chat still runs.
+
 ---
 
 Built by [Tyler Dodgen](https://github.com/dodgen92) to make streams more interactive.
