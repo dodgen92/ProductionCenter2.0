@@ -23,6 +23,8 @@ import clips
 from gemini_usage import gemini_usage
 from Pokemon.pokerip import catch_pokemon
 
+import streamelements_chat
+
 # =============================
 # CONFIGURATION
 # =============================
@@ -190,6 +192,23 @@ def events():
         out = [event for event in EVENTS if event["id"] > since]
         last = EVENT_ID
     resp = jsonify({"last_id": last, "events": out})
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/wow-chat/feed")
+def wow_chat_feed():
+    """YouTube and Kick lines for the WoW chat widget.
+
+    Same shape as /events: the widget polls ?since=. The StreamElements
+    token stays in this process. Twitch chat does not use this route.
+    """
+
+    since = request.args.get("since", default=0, type=int)
+    if since is None:
+        since = 0
+    resp = jsonify(streamelements_chat.feed_since(since))
     resp.headers["Access-Control-Allow-Origin"] = "*"
     resp.headers["Cache-Control"] = "no-store"
     return resp
@@ -1783,6 +1802,9 @@ if __name__ == "__main__":
     # Downloads take a while. Do not wait for them before opening port 5000.
     Thread(target=refresh_clip_library, daemon=True).start()
 
+    # No token, or STREAMELEMENTS_ENABLED off, prints one line and skips.
+    streamelements_chat.start()
+
     eventsub_client = EventSubClient()
     eventsub_client.start()
 
@@ -1796,4 +1818,5 @@ if __name__ == "__main__":
 
     finally:
         eventsub_client.stop()
+        streamelements_chat.stop()
         stop_archive()

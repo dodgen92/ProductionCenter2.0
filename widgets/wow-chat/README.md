@@ -42,3 +42,11 @@ Moderation: CLEARCHAT (whole chat, or one user via `target-user-id`) and CLEARMS
 Anonymous chat can't see follows, channel-point redemptions without a message, or bits/follow alerts. The only extras it gets are cheers (the `bits` tag on PRIVMSG) and USERNOTICE subs and raids. The widget reconnects with backoff (1s doubling to 30s) and answers PING with PONG and RECONNECT with a reconnect.
 
 Font: Archivo Narrow (SIL OFL, `ArchivoNarrow.ttf` + `OFL.txt`), bundled locally, with fallback `'Arial Narrow', sans-serif`.
+
+## YouTube and Kick
+
+Twitch chat is still the anonymous IRC connection above. YouTube and Kick come from Flask, which holds the StreamElements token. The page polls `GET /wow-chat/feed?since=` on the same host (or `http://127.0.0.1:5000/wow-chat/feed` if this file was opened directly). If Flask is down, or StreamElements is not configured, that poll backs off and Twitch lines keep working.
+
+Each YouTube line has a small red `YT` tag. Each Kick line has a small green `K` tag. They sit inside the same line as the text, so `fade=0` keeps them and `max` drops them with the line. Viewer text is escaped before it is drawn. A delete, a timeout, or a cleared chat removes the matching YouTube or Kick lines and leaves Twitch lines up.
+
+Point the OBS browser source at `http://localhost:5000/widgets/wow-chat/index.html?channel=YOURNAME` so the feed and the page share one host. The token is not in that URL. Setup for the token is in the project README.

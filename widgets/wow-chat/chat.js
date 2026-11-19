@@ -34,6 +34,8 @@ function render(text,emotes){
 function add(html,color,meta={}){
   const d=document.createElement('div');d.className='line';d.style.color=color;
   if(meta.id)d.dataset.id=meta.id;if(meta.uid)d.dataset.uid=meta.uid;
+  if(meta.provider)d.dataset.provider=meta.provider;
+  if(meta.login)d.dataset.login=meta.login;
   d.innerHTML=(SHOWTS?`<span class="ts">[${now()}]</span> `:'')+html;lines.appendChild(d);
   while(lines.children.length>MAX)lines.firstChild.remove();
   if(FADE>0)setTimeout(()=>{d.classList.add('out');setTimeout(()=>d.remove(),1000)},FADE*1000);
@@ -83,6 +85,75 @@ function parse(raw){let i=0;const o={tags:{},prefix:'',cmd:'',params:[],trailing
   if(raw[i]===':'){const sp=raw.indexOf(' ',i);o.prefix=raw.slice(i+1,sp);i=sp+1;}
   const tr=raw.indexOf(' :',i);const head=tr<0?raw.slice(i):raw.slice(i,tr);if(tr>=0)o.trailing=raw.slice(tr+2);
   const parts=head.split(' ').filter(Boolean);o.cmd=parts.shift()||'';o.params=parts;return o;}
+// YouTube and Kick arrive from Flask (GET /wow-chat/feed). Text is escaped like Twitch.
+const gone=new Set(),goneQ=[];
+function rememberGone(id){if(!id||gone.has(id))return;gone.add(id);goneQ.push(id);while(goneQ.length>300)gone.delete(goneQ.shift());}
+function badge(provider){
+  if(provider==='youtube')return '<span class="src yt">YT</span>';
+  if(provider==='kick')return '<span class="src kick">K</span>';
+  return '';
+}
+function seRole(roles){const has=k=>Array.isArray(roles)&&roles.indexOf(k)!==-1;
+  if(has('broadcaster'))return'raid';if(has('moderator'))return'officer';if(has('vip'))return'party';
+  if(has('subscriber')||has('founder'))return'guild';return'viewer';}
+function handleFeed(msg){
+  if(!msg||typeof msg!=='object')return;
+  const provider=String(msg.provider||'');
+  if(provider!=='youtube'&&provider!=='kick')return;
+  const mark=badge(provider);
+  if(msg.event==='message_deleted'){
+    if(!msg.message_id)return;
+    const id=provider+':'+msg.message_id;rememberGone(id);
+    lines.querySelectorAll('.line[data-id="'+CSS.escape(id)+'"]').forEach(l=>l.remove());return;}
+  if(msg.event==='user_cleared'){
+    if(msg.user_id){
+      const uid=provider+':'+msg.user_id;
+      lines.querySelectorAll('.line[data-uid="'+CSS.escape(uid)+'"]').forEach(l=>l.remove());}
+    const who=String(msg.login||'').toLowerCase();
+    if(who)lines.querySelectorAll('.line[data-provider="'+CSS.escape(provider)+'"][data-login="'+CSS.escape(who)+'"]').forEach(l=>l.remove());
+    return;}
+  if(msg.event==='chat_cleared'){
+    lines.querySelectorAll('.line[data-provider="'+CSS.escape(provider)+'"]').forEach(l=>l.remove());return;}
+  if(msg.event!=='message')return;
+  const login=String(msg.login||'').toLowerCase();
+  const name=msg.name||login||'Someone';
+  const text=String(msg.text||'');
+  if(!text.trim())return;
+  if(BOTS.has(login))return;
+  if(HIDECMDS&&text.startsWith('!'))return;
+  const id=msg.message_id?provider+':'+msg.message_id:'';
+  if(id&&gone.has(id))return;
+  const uid=msg.user_id?provider+':'+msg.user_id:'';
+  const body=esc(text),N=esc(name),meta={id:id,uid:uid,provider:provider,login:login};
+  if(msg.kind==='action'){add(mark+N+' '+body,C.emote,meta);return;}
+  const r=seRole(msg.roles);
+  let html,color;
+  if(PREFIX[r]){html=`${PREFIX[r]}[${N}]: ${body}`;color=C[r];}
+  else if(hash(login||name)%2){html=`[1. General] [${N}]: ${body}`;color=C.general;}
+  else{html=`[${N}] says: ${body}`;color=C.say;}
+  if(msg.kind==='highlighted')color=C.whisper;
+  add(mark+html,color,meta);
+}
+function feedUrl(){
+  try{if(location.protocol==='http:'||location.protocol==='https:')return new URL('/wow-chat/feed',location.origin).href;}catch(e){}
+  return 'http://127.0.0.1:5000/wow-chat/feed';
+}
+function connectFeed(){
+  // Flask down, or StreamElements not configured: this poll just backs off. Twitch IRC is separate.
+  let since=0,delay=500;
+  const base=feedUrl();
+  (async function poll(){
+    try{
+      const r=await fetch(base+'?since='+since,{cache:'no-store'});
+      if(!r.ok)throw new Error('feed');
+      const j=await r.json();
+      for(const msg of j.messages||[]){if(typeof msg.seq==='number')since=Math.max(since,msg.seq);handleFeed(msg);}
+      if(typeof j.last_seq==='number')since=Math.max(since,j.last_seq);
+      delay=500;
+    }catch(e){delay=Math.min(delay*2,15000);}
+    setTimeout(poll,delay);
+  })();
+}
 function handleRaw(raw,ws){
   const m=parse(raw);
   switch(m.cmd){
@@ -94,9 +165,10 @@ function handleRaw(raw,ws){
     case'RECONNECT':ws&&ws.close();break;
   }
 }
-window.wowChat={handleRaw,parse};
+window.wowChat={handleRaw,parse,handleFeed};
 
 if(TEST){runTest();return;}
+connectFeed();
 if(!CHANNEL){document.getElementById('hint').hidden=false;return;}
 let delay=1000;
 function connect(){
